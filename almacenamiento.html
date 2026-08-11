@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Almacenamiento — ALM9037</title>
+<style>
+  :root{
+    --bg:#0d1117;
+    --panel:#151b23;
+    --panel2:#1c2430;
+    --border:#2a3444;
+    --text:#e6edf3;
+    --dim:#8b98a8;
+    --accent:#ff8a3d;
+    --accent2:#3ddc97;
+    --danger:#ff5d5d;
+    --warn:#f5c542;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:0;
+    background:linear-gradient(180deg,#0d1117 0%,#0a0e14 100%);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  header{
+    padding:16px 18px 10px;
+    border-bottom:1px solid var(--border);
+    position:sticky; top:0; z-index:10;
+    background:rgba(13,17,23,0.96);
+    backdrop-filter:blur(6px);
+  }
+  header h1{
+    margin:0; font-size:17px; letter-spacing:.3px;
+    display:flex; align-items:center; gap:8px;
+  }
+  header h1 .tag{
+    font-size:10px; font-weight:700; letter-spacing:1px;
+    background:var(--accent); color:#241100; padding:2px 7px; border-radius:5px;
+  }
+  header p{margin:4px 0 0; font-size:12px; color:var(--dim);}
+
+  main{padding:14px 14px 90px; max-width:1100px; margin:0 auto;}
+
+  .card{
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:var(--radius); padding:14px; margin-bottom:14px;
+  }
+  .card h2{
+    margin:0 0 10px; font-size:13px; text-transform:uppercase;
+    letter-spacing:.6px; color:var(--dim); font-weight:700;
+  }
+
+  .row{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;}
+  .field{display:flex; flex-direction:column; gap:5px; min-width:110px; flex:1;}
+  .field label{font-size:11px; color:var(--dim);}
+  .field input, .field select{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:9px 10px; border-radius:8px; font-size:14px; width:100%;
+  }
+  .field input:focus, .field select:focus{outline:1px solid var(--accent); border-color:var(--accent);}
+
+  button{
+    border:none; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600;
+    cursor:pointer; transition:transform .08s ease, opacity .15s ease;
+  }
+  button:active{transform:scale(.97);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  .btn-primary{background:var(--accent); color:#241100;}
+  .btn-secondary{background:var(--panel2); color:var(--text); border:1px solid var(--border);}
+  .btn-success{background:var(--accent2); color:#04241a;}
+
+  .stats{display:flex; gap:10px; flex-wrap:wrap;}
+  .stat{
+    flex:1; min-width:100px; background:var(--panel2); border:1px solid var(--border);
+    border-radius:8px; padding:10px 12px;
+  }
+  .stat .n{font-size:20px; font-weight:800;}
+  .stat .l{font-size:11px; color:var(--dim); margin-top:2px;}
+  .stat.ok .n{color:var(--accent2);}
+  .stat.warn .n{color:var(--warn);}
+  .stat.danger .n{color:var(--danger);}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{
+    text-align:left; color:var(--dim); font-weight:600; font-size:11px;
+    text-transform:uppercase; letter-spacing:.4px; padding:8px 8px;
+    border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel);
+  }
+  td{padding:8px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top;}
+  tr:hover td{background:rgba(255,255,255,.02);}
+  .tablewrap{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+
+  .pill{
+    display:inline-block; padding:3px 8px; border-radius:20px; font-size:11px; font-weight:700;
+  }
+  .pill.ok{background:rgba(61,220,151,.15); color:var(--accent2);}
+  .pill.warn{background:rgba(245,197,66,.15); color:var(--warn);}
+  .pill.danger{background:rgba(255,93,93,.15); color:var(--danger);}
+  .pill.muted{background:rgba(139,152,168,.15); color:var(--dim);}
+
+  input.ubic-edit{
+    background:var(--panel2); border:1px solid var(--border); color:var(--accent);
+    font-weight:700; padding:6px 8px; border-radius:6px; font-size:13px; width:150px;
+  }
+
+  #log{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11.5px; color:var(--dim); white-space:pre-wrap;
+    max-height:140px; overflow-y:auto; line-height:1.5;
+  }
+  #log .err{color:var(--danger);}
+  #log .ok{color:var(--accent2);}
+
+  .footerbar{
+    position:fixed; bottom:0; left:0; right:0;
+    background:rgba(13,17,23,.97); border-top:1px solid var(--border);
+    padding:10px 14px; display:flex; gap:10px; backdrop-filter:blur(6px);
+  }
+  .footerbar button{flex:1;}
+
+  .empty{color:var(--dim); font-size:13px; text-align:center; padding:24px 10px;}
+  small.note{color:var(--dim); font-size:11px; display:block; margin-top:6px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Almacenamiento <span class="tag">ALM9037</span></h1>
+  <p>Asignación óptima de ubicaciones para pallets de Import</p>
+</header>
+
+<main>
+
+  <div class="card" id="cfgCard">
+    <h2>Conexión</h2>
+    <div class="row">
+      <div class="field" style="flex:3;min-width:220px;">
+        <label>URL del Apps Script (Web App /exec)</label>
+        <input id="scriptUrl" type="text" placeholder="https://script.google.com/macros/s/XXXX/exec">
+      </div>
+      <div class="field" style="flex:0 0 auto;">
+        <button class="btn-secondary" id="saveUrlBtn">Guardar URL</button>
+      </div>
+    </div>
+    <small class="note">Se guarda solo en este dispositivo (localStorage). Ver Code.gs para desplegar el backend.</small>
+  </div>
+
+  <div class="card">
+    <h2>Parámetros de búsqueda</h2>
+    <div class="row">
+      <div class="field">
+        <label>Nivel inicio</label>
+        <select id="nivelInicio">
+          <option>A</option><option>B</option><option>C</option><option>D</option>
+          <option>E</option><option>F</option><option>G</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Nivel final</label>
+        <select id="nivelFinal">
+          <option>A</option><option>B</option><option>C</option><option>D</option>
+          <option>E</option><option>F</option><option>G</option>
+          <option selected>G</option>
+        </select>
+      </div>
+      <div class="field" style="flex:2;min-width:180px;">
+        <label>Pallets a procesar</label>
+        <select id="modoProceso">
+          <option value="pendientes">Solo sin ubicación asignada (H vacía)</option>
+          <option value="todos">Recalcular todos</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Resumen</h2>
+    <div class="stats">
+      <div class="stat"><div class="n" id="stTotal">0</div><div class="l">Pallets Import</div></div>
+      <div class="stat ok"><div class="n" id="stAsig">0</div><div class="l">Asignados</div></div>
+      <div class="stat warn"><div class="n" id="stPend">0</div><div class="l">Pendientes</div></div>
+      <div class="stat danger"><div class="n" id="stSin">0</div><div class="l">Sin ubicación</div></div>
+      <div class="stat"><div class="n" id="stLibres">0</div><div class="l">Ubicaciones libres (Sincronizado)</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Resultado de asignación</h2>
+    <div class="tablewrap">
+      <table id="resultTable">
+        <thead>
+          <tr>
+            <th>Pallet</th><th>Cod SAP</th><th>Descripción</th><th>Lote</th>
+            <th>Venc.</th><th>Cant.</th><th>Ubic. actual</th><th>Ubic. propuesta</th><th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="resultBody">
+          <tr><td colspan="9" class="empty">Cargá los datos para ver resultados.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Registro</h2>
+    <div id="log">Esperando acción…</div>
+  </div>
+
+</main>
+
+<div class="footerbar">
+  <button class="btn-secondary" id="loadBtn">Cargar datos</button>
+  <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
+  <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
+</div>
+
+<script>
+/* ============================================================
+   ALM9037 — Sistema de Almacenamiento
+   Lógica de asignación de ubicaciones (heurística, ver notas).
+   ============================================================ */
+
+let SCRIPT_URL = localStorage.getItem('alm_storage_script_url') || '';
+document.getElementById('scriptUrl').value = SCRIPT_URL;
+
+let sincronizado = [];   // filas de la hoja "Sincronizado" (E:S)
+let importData = [];     // filas de la hoja "Import" (A:J)
+let asignaciones = [];   // resultado calculado en esta sesión: {pallet, ubicacion, estado, row}
+
+const $ = id => document.getElementById(id);
+
+function log(msg, cls){
+  const el = $('log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  const t = new Date().toLocaleTimeString('es-CL');
+  line.textContent = `[${t}] ${msg}`;
+  el.prepend(line);
+}
+
+$('saveUrlBtn').addEventListener('click', () => {
+  SCRIPT_URL = $('scriptUrl').value.trim();
+  localStorage.setItem('alm_storage_script_url', SCRIPT_URL);
+  log('URL guardada.', 'ok');
+});
+
+/* ---------------- Carga de datos ---------------- */
+
+$('loadBtn').addEventListener('click', loadData);
+
+async function loadData(){
+  if (!SCRIPT_URL){
+    log('Primero configurá y guardá la URL del Apps Script.', 'err');
+    return;
+  }
+  $('loadBtn').disabled = true;
+  log('Cargando datos desde Sincronizado e Import…');
+  try{
+    const res = await fetch(`${SCRIPT_URL}?action=data`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    sincronizado = data.sincronizado || [];
+    importData = data.importData || [];
+    log(`OK: ${sincronizado.length} ubicaciones en Sincronizado, ${importData.length} pallets en Import.`, 'ok');
+    $('calcBtn').disabled = false;
+    renderStats();
+    renderPreview();
+  }catch(err){
+    log('Error al cargar datos: ' + err.message, 'err');
+  }finally{
+    $('loadBtn').disabled = false;
+  }
+}
+
+function renderStats(){
+  const libres = sincronizado.filter(r => !r.codSap).length;
+  $('stTotal').textContent = importData.length;
+  $('stLibres').textContent = libres;
+  const asignados = importData.filter(r => r.ubicacion).length;
+  $('stAsig').textContent = asignados;
+  $('stPend').textContent = importData.length - asignados;
+  $('stSin').textContent = 0;
+}
+
+function renderPreview(){
+  const body = $('resultBody');
+  body.innerHTML = '';
+  if (!importData.length){
+    body.innerHTML = '<tr><td colspan="9" class="empty">No hay pallets en Import.</td></tr>';
+    return;
+  }
+  importData.forEach(p => {
+    body.appendChild(rowFor(p, p.ubicacion, p.ubicacion ? 'ya asignado' : 'pendiente'));
+  });
+}
+
+function rowFor(p, ubicPropuesta, estado){
+  const tr = document.createElement('tr');
+  const pillClass = estado === 'asignado' ? 'ok'
+                    : estado === 'ya asignado' ? 'muted'
+                    : estado === 'sin ubicación disponible' ? 'danger'
+                    : 'warn';
+  tr.innerHTML = `
+    <td>${esc(p.nPallet)}</td>
+    <td>${esc(p.codSap)}</td>
+    <td style="max-width:220px;">${esc(p.descripcion)}</td>
+    <td>${esc(p.lote)}</td>
+    <td>${esc(p.vencimiento)}</td>
+    <td>${esc(p.disponible)}</td>
+    <td>${esc(p.ubicacion) || '<span style="color:var(--dim)">—</span>'}</td>
+    <td><input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}"></td>
+    <td><span class="pill ${pillClass}">${estado}</span></td>
+  `;
+  return tr;
+}
+
+function esc(v){
+  return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+/* ---------------- Motor de asignación ---------------- */
+
+$('calcBtn').addEventListener('click', calcular);
+
+function cuerpoDe(rack){
+  const n = Number(rack) || 0;
+  return Math.ceil(n / 3) || 1;
+}
+
+function nivelLetra(nivel){
+  return String(nivel || '').trim().charAt(0).toUpperCase();
+}
+function nivelProfundidad(nivel){
+  const s = String(nivel || '').trim();
+  return s.length > 1 ? s.charAt(1) : '1';
+}
+const LETRAS = ['A','B','C','D','E','F','G'];
+function enRango(letra, inicio, fin){
+  const i = LETRAS.indexOf(inicio), f = LETRAS.indexOf(fin), l = LETRAS.indexOf(letra);
+  if (i === -1 || f === -1 || l === -1) return true;
+  return l >= Math.min(i,f) && l <= Math.max(i,f);
+}
+
+function calcular(){
+  if (!sincronizado.length){
+    log('No hay datos de Sincronizado cargados.', 'err');
+    return;
+  }
+  const nivelInicio = $('nivelInicio').value;
+  const nivelFinal = $('nivelFinal').value;
+  const modo = $('modoProceso').value;
+
+  // Copia de trabajo (no mutamos los datos originales cargados del Sheet)
+  const slots = sincronizado.map(r => ({...r}));
+
+  // Índices auxiliares
+  const byPosBase = new Map();   // rack|ubic -> [slots] (todas las columnas verticales, cualquier nivel)
+  const byUbicacion = new Map(); // E (ubicacion string) -> [slots] (1 o 2, para dobles)
+  slots.forEach(s => {
+    const posKey = `${s.rack}|${s.ubic}`;
+    if (!byPosBase.has(posKey)) byPosBase.set(posKey, []);
+    byPosBase.get(posKey).push(s);
+    if (!byUbicacion.has(s.ubicacion)) byUbicacion.set(s.ubicacion, []);
+    byUbicacion.get(s.ubicacion).push(s);
+  });
+
+  // Cuerpos disponibles, ascendente (punto e: revisión de menor a mayor)
+  const cuerpos = [...new Set(slots.map(s => cuerpoDe(s.rack)))].sort((a,b) => a-b);
+
+  const pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
+  // Orden por Nº Pallet ascendente
+  pendientes.sort((a,b) => String(a.nPallet).localeCompare(String(b.nPallet), 'es', {numeric:true}));
+
+  asignaciones = [];
+  const body = $('resultBody');
+  body.innerHTML = '';
+
+  // pallets ya asignados (modo "pendientes") se listan igual, de solo lectura
+  const yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
+  yaAsignados.forEach(p => body.appendChild(rowFor(p, p.ubicacion, 'ya asignado')));
+
+  let sinUbicacion = 0;
+
+  pendientes.forEach(p => {
+    const resultado = buscarUbicacion(p, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal);
+    if (resultado){
+      asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
+      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado'));
+      log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
+    } else {
+      sinUbicacion++;
+      body.appendChild(rowFor(p, '', 'sin ubicación disponible'));
+      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN DISPONIBLE`, 'err');
+    }
+  });
+
+  $('stAsig').textContent = importData.filter(p=>p.ubicacion).length + asignaciones.length;
+  $('stPend').textContent = pendientes.length - asignaciones.length;
+  $('stSin').textContent = sinUbicacion;
+  $('stLibres').textContent = slots.filter(s => !s.codSap).length;
+
+  $('saveBtn').disabled = asignaciones.length === 0;
+  log(`Cálculo terminado: ${asignaciones.length} asignados, ${sinUbicacion} sin ubicación.`, asignaciones.length ? 'ok' : 'err');
+}
+
+/**
+ * Busca la mejor ubicación para un pallet dentro de las reglas:
+ *  - Por bloques (cuerpos) ascendente, tipo árbol (expande al siguiente cuerpo si no hay).
+ *  - Prioriza apilar VERTICALMENTE junto al mismo código SAP (misma columna rack/ubic, distinto nivel).
+ *  - Respeta restricción de Dobles: no pueden coexistir código/lote/vencimiento distintos en A1/A2 (o par de nivel).
+ *  - Respeta el rango de Nivel Inicio-Final elegido.
+ */
+function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal){
+  for (const cuerpo of cuerpos){
+    const candidatosCuerpo = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+    if (!candidatosCuerpo.length) continue;
+
+    // Prioridad 1: apilar verticalmente junto al mismo código SAP ya almacenado en esa columna
+    const columnasConMismoCodigo = new Set(
+      candidatosCuerpo.filter(s => s.codSap === pallet.codSap).map(s => `${s.rack}|${s.ubic}`)
+    );
+    for (const posKey of columnasConMismoCodigo){
+      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+      // niveles ascendentes dentro de la misma columna
+      columna.sort((a,b) => LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel)));
+      for (const slot of columna){
+        if (slotUtilizable(slot, pallet, byUbicacion)){
+          ocuparSlot(slot, pallet);
+          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código' };
+        }
+      }
+    }
+
+    // Prioridad 2: locaciones tipo PICKING libres del mismo código (más cercanas al picking)
+    const picking = candidatosCuerpo
+      .filter(s => s.tipo === 'PICKING' && s.codSap === pallet.codSap)
+      .sort((a,b) => a.rack - b.rack);
+    for (const slot of picking){
+      if (slotUtilizable(slot, pallet, byUbicacion)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING' };
+      }
+    }
+
+    // Prioridad 3: cualquier ubicación libre y compatible dentro del cuerpo, rack/ubic/nivel ascendente
+    const libres = candidatosCuerpo
+      .slice()
+      .sort((a,b) => (a.rack - b.rack) || String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
+    for (const slot of libres){
+      if (slotUtilizable(slot, pallet, byUbicacion)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: `cuerpo ${cuerpo}, primera disponible` };
+      }
+    }
+    // nada en este cuerpo -> el for externo sigue al próximo cuerpo (búsqueda tipo árbol)
+  }
+  return null;
+}
+
+/** Un slot es utilizable si está vacío y, si es Doble (u otro par de nivel), no choca con su par. */
+function slotUtilizable(slot, pallet, byUbicacion){
+  if (slot.codSap) return false; // ya ocupado
+  const par = (byUbicacion.get(slot.ubicacion) || []).filter(s => s !== slot);
+  if (!par.length) return true; // Simple/Bajo/Pilar/Picking sin par
+  for (const otro of par){
+    if (!otro.codSap) continue; // el par está vacío, no hay conflicto
+    const mismoProducto = otro.codSap === pallet.codSap && otro.lote === pallet.lote && otro.vencimiento === pallet.vencimiento;
+    if (!mismoProducto) return false; // restricción c): no pueden coexistir código/lote/vencimiento distintos
+  }
+  return true;
+}
+
+function ocuparSlot(slot, pallet){
+  slot.codSap = pallet.codSap;
+  slot.lote = pallet.lote;
+  slot.vencimiento = pallet.vencimiento;
+}
+
+/* ---------------- Guardado en Sheet ---------------- */
+
+$('saveBtn').addEventListener('click', guardar);
+
+async function guardar(){
+  // tomar los valores actuales de los inputs editables (por si el usuario corrigió algo)
+  const inputs = document.querySelectorAll('.ubic-edit');
+  const porPallet = new Map();
+  inputs.forEach(inp => {
+    const val = inp.value.trim();
+    if (val) porPallet.set(inp.dataset.pallet, val);
+  });
+
+  const paraGuardar = asignaciones
+    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || a.ubicacion }))
+    .filter(a => a.ubicacion);
+
+  if (!paraGuardar.length){
+    log('No hay asignaciones para guardar.', 'err');
+    return;
+  }
+  if (!SCRIPT_URL){
+    log('Falta configurar la URL del Apps Script.', 'err');
+    return;
+  }
+
+  $('saveBtn').disabled = true;
+  log(`Guardando ${paraGuardar.length} ubicaciones en Import!H…`);
+
+  // Enviar en lotes para no exceder el largo de la URL (GET-only)
+  const LOTE = 25;
+  let okCount = 0, errCount = 0;
+  for (let i = 0; i < paraGuardar.length; i += LOTE){
+    const chunk = paraGuardar.slice(i, i + LOTE);
+    try{
+      const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(chunk))}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      (data.results || []).forEach(r => r.ok ? okCount++ : errCount++);
+    }catch(err){
+      errCount += chunk.length;
+      log('Error guardando lote: ' + err.message, 'err');
+    }
+  }
+
+  log(`Guardado terminado: ${okCount} OK, ${errCount} con error.`, errCount ? 'err' : 'ok');
+  if (okCount) {
+    log('Recargá los datos para ver Import actualizado.', 'ok');
+  }
+}
+</script>
+</body>
+</html>
