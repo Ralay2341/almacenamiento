@@ -198,6 +198,12 @@
 
   <div class="card">
     <h2>Resultado de asignación</h2>
+    <div class="row" style="margin-bottom:10px;">
+      <div class="field" style="flex:2;min-width:180px;">
+        <label>Filtrar por Cód. SAP</label>
+        <input id="filtroCodSap" type="text" placeholder="Ej: 101245 (dejá vacío para ver todos)">
+      </div>
+    </div>
     <div class="tablewrap">
       <table id="resultTable">
         <thead>
@@ -211,6 +217,7 @@
         </tbody>
       </table>
     </div>
+    <small class="note" id="filtroInfo"></small>
   </div>
 
   <div class="card">
@@ -331,10 +338,12 @@ function renderPreview(){
   importData.forEach(p => {
     body.appendChild(rowFor(p, p.ubicacion, p.ubicacion ? 'ya asignado' : 'pendiente'));
   });
+  aplicarFiltroCodSap();
 }
 
 function rowFor(p, ubicPropuesta, estado){
   const tr = document.createElement('tr');
+  tr.dataset.codsap = String(p.codSap || '').toUpperCase();
   const pillClass = estado === 'asignado' ? 'ok'
                     : estado === 'ya asignado' ? 'muted'
                     : estado === 'sin ubicación disponible' ? 'danger'
@@ -352,6 +361,30 @@ function rowFor(p, ubicPropuesta, estado){
   `;
   return tr;
 }
+
+/* ---------------- Filtro por Cód. SAP ---------------- */
+
+$('filtroCodSap').addEventListener('input', aplicarFiltroCodSap);
+
+function aplicarFiltroCodSap(){
+  const q = $('filtroCodSap').value.trim().toUpperCase();
+  const filas = $('resultBody').querySelectorAll('tr[data-codsap]');
+  let visibles = 0;
+  filas.forEach(tr => {
+    const coincide = !q || tr.dataset.codsap.includes(q);
+    tr.style.display = coincide ? '' : 'none';
+    if (coincide) visibles++;
+  });
+  const info = $('filtroInfo');
+  if (!filas.length){
+    info.textContent = '';
+  } else if (q){
+    info.textContent = `Mostrando ${visibles} de ${filas.length} filas para "${q}".`;
+  } else {
+    info.textContent = '';
+  }
+}
+
 
 function esc(v){
   return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -460,6 +493,7 @@ function calcular(){
 
   $('saveBtn').disabled = asignaciones.length === 0;
   log(`Cálculo terminado: ${asignaciones.length} asignados, ${sinUbicacion} sin ubicación.`, asignaciones.length ? 'ok' : 'err');
+  aplicarFiltroCodSap();
 }
 
 /**
