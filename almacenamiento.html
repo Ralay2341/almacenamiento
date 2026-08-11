@@ -163,8 +163,7 @@
         <label>Nivel final</label>
         <select id="nivelFinal">
           <option>A</option><option>B</option><option>C</option><option>D</option>
-          <option>E</option><option>F</option><option>G</option>
-          <option selected>G</option>
+          <option>E</option><option>F</option><option selected>G</option>
         </select>
       </div>
       <div class="field" style="flex:2;min-width:180px;">
@@ -406,13 +405,14 @@ function calcular(){
 
   // Índices auxiliares
   const byPosBase = new Map();   // rack|ubic -> [slots] (todas las columnas verticales, cualquier nivel)
-  const byUbicacion = new Map(); // E (ubicacion string) -> [slots] (1 o 2, para dobles)
+  const byNivelPar = new Map();  // rack|ubic|letraNivel -> [slots] (1 o 2: Frente A1 y Fondo A2 del mismo par)
   slots.forEach(s => {
     const posKey = `${s.rack}|${s.ubic}`;
     if (!byPosBase.has(posKey)) byPosBase.set(posKey, []);
     byPosBase.get(posKey).push(s);
-    if (!byUbicacion.has(s.ubicacion)) byUbicacion.set(s.ubicacion, []);
-    byUbicacion.get(s.ubicacion).push(s);
+    const parKey = `${s.rack}|${s.ubic}|${nivelLetra(s.nivel)}`;
+    if (!byNivelPar.has(parKey)) byNivelPar.set(parKey, []);
+    byNivelPar.get(parKey).push(s);
   });
 
   // Cuerpos a revisar, ascendente (punto e: revisión de menor a mayor).
@@ -441,7 +441,7 @@ function calcular(){
   let sinUbicacion = 0;
 
   pendientes.forEach(p => {
-    const resultado = buscarUbicacion(p, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal, rackDestino);
+    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, cuerpos, nivelInicio, nivelFinal, rackDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
       body.appendChild(rowFor(p, resultado.ubicacion, 'asignado'));
@@ -469,7 +469,7 @@ function calcular(){
  *  - Respeta restricción de Dobles: no pueden coexistir código/lote/vencimiento distintos en A1/A2 (o par de nivel).
  *  - Respeta el rango de Nivel Inicio-Final elegido.
  */
-function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal, rackDestino){
+function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, cuerpos, nivelInicio, nivelFinal, rackDestino){
   for (const cuerpo of cuerpos){
     let candidatosCuerpo = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
     // Rack destino explícito: acota el cuerpo completo solo al Rack elegido.
@@ -485,7 +485,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelIn
       // niveles ascendentes dentro de la misma columna
       columna.sort((a,b) => LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel)));
       for (const slot of columna){
-        if (slotUtilizable(slot, pallet, byUbicacion)){
+        if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
           return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código' };
         }
@@ -497,7 +497,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelIn
       .filter(s => s.tipo === 'PICKING' && s.codSap === pallet.codSap)
       .sort((a,b) => a.rack - b.rack);
     for (const slot of picking){
-      if (slotUtilizable(slot, pallet, byUbicacion)){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
         return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING' };
       }
@@ -508,7 +508,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelIn
       .slice()
       .sort((a,b) => (a.rack - b.rack) || String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
     for (const slot of libres){
-      if (slotUtilizable(slot, pallet, byUbicacion)){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
         return { ubicacion: slot.ubicacion, motivo: `cuerpo ${cuerpo}, primera disponible` };
       }
@@ -518,10 +518,19 @@ function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelIn
   return null;
 }
 
-/** Un slot es utilizable si está vacío y, si es Doble (u otro par de nivel), no choca con su par. */
-function slotUtilizable(slot, pallet, byUbicacion){
+/**
+ * Un slot es utilizable si está vacío y, si tiene "par" (Frente/Fondo del
+ * mismo Rack+Ubic+Nivel, ej. A1/A2), el par cumple la restricción:
+ *  - Si el par está vacío -> se puede asignar sin problema.
+ *  - Si el par está ocupado -> SOLO se puede asignar si es exactamente el
+ *    mismo Cód. SAP + Lote + Fecha de Vencimiento (no se mezclan productos
+ *    distintos en el mismo par, en ninguna de las dos direcciones:
+ *    A1 vacío/A2 ocupado, o A2 vacío/A1 ocupado).
+ */
+function slotUtilizable(slot, pallet, byNivelPar){
   if (slot.codSap) return false; // ya ocupado
-  const par = (byUbicacion.get(slot.ubicacion) || []).filter(s => s !== slot);
+  const parKey = `${slot.rack}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
+  const par = (byNivelPar.get(parKey) || []).filter(s => s !== slot);
   if (!par.length) return true; // Simple/Bajo/Pilar/Picking sin par
   for (const otro of par){
     if (!otro.codSap) continue; // el par está vacío, no hay conflicto
