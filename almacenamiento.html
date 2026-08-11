@@ -175,6 +175,15 @@
         </select>
       </div>
     </div>
+    <div class="row" style="margin-top:10px;">
+      <div class="field" style="flex:2;min-width:200px;">
+        <label>Rack destino</label>
+        <select id="rackDestino">
+          <option value="">Automático (busca por bloques, de menor a mayor)</option>
+        </select>
+      </div>
+    </div>
+    <small class="note">Si elegís un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Se completa al cargar los datos.</small>
   </div>
 
   <div class="card">
@@ -227,6 +236,15 @@
 let SCRIPT_URL = localStorage.getItem('alm_storage_script_url') || '';
 document.getElementById('scriptUrl').value = SCRIPT_URL;
 
+/* Cualquier error de JS que antes quedaba "silencioso" (la pantalla se
+   quedaba en "Esperando acción…" sin explicar por qué) ahora se ve acá. */
+window.addEventListener('error', (ev) => {
+  log('Error de script: ' + (ev.message || ev), 'err');
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  log('Error async: ' + (ev.reason && ev.reason.message ? ev.reason.message : ev.reason), 'err');
+});
+
 let sincronizado = [];   // filas de la hoja "Sincronizado" (E:S)
 let importData = [];     // filas de la hoja "Import" (A:J)
 let asignaciones = [];   // resultado calculado en esta sesión: {pallet, ubicacion, estado, row}
@@ -269,6 +287,7 @@ async function loadData(){
     $('calcBtn').disabled = false;
     renderStats();
     renderPreview();
+    poblarRacks();
   }catch(err){
     log('Error al cargar datos: ' + err.message, 'err');
   }finally{
@@ -284,6 +303,23 @@ function renderStats(){
   $('stAsig').textContent = asignados;
   $('stPend').textContent = importData.length - asignados;
   $('stSin').textContent = 0;
+}
+
+/** Llena el select "Rack destino" con los racks reales encontrados en Sincronizado. */
+function poblarRacks(){
+  const sel = $('rackDestino');
+  const valorPrevio = sel.value;
+  const racks = [...new Set(sincronizado.map(r => r.rack))]
+    .filter(r => r !== '' && r !== null && r !== undefined)
+    .sort((a,b) => Number(a) - Number(b));
+  sel.innerHTML = '<option value="">Automático (busca por bloques, de menor a mayor)</option>';
+  racks.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = String(r);
+    opt.textContent = `Rack ${r} (cuerpo ${cuerpoDe(r)})`;
+    sel.appendChild(opt);
+  });
+  if (racks.map(String).includes(valorPrevio)) sel.value = valorPrevio;
 }
 
 function renderPreview(){
@@ -353,6 +389,7 @@ function calcular(){
   const nivelInicio = $('nivelInicio').value;
   const nivelFinal = $('nivelFinal').value;
   const modo = $('modoProceso').value;
+  const rackDestino = $('rackDestino').value; // '' = automático (todos los cuerpos)
 
   // Copia de trabajo (no mutamos los datos originales cargados del Sheet)
   const slots = sincronizado.map(r => ({...r}));
@@ -368,8 +405,12 @@ function calcular(){
     byUbicacion.get(s.ubicacion).push(s);
   });
 
-  // Cuerpos disponibles, ascendente (punto e: revisión de menor a mayor)
-  const cuerpos = [...new Set(slots.map(s => cuerpoDe(s.rack)))].sort((a,b) => a-b);
+  // Cuerpos a revisar, ascendente (punto e: revisión de menor a mayor).
+  // Si se eligió un Rack destino específico, la búsqueda queda acotada
+  // solo a ese Rack (no se expande a otros bloques).
+  const cuerpos = rackDestino
+    ? [cuerpoDe(rackDestino)]
+    : [...new Set(slots.map(s => cuerpoDe(s.rack)))].sort((a,b) => a-b);
 
   const pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
   // Orden por Nº Pallet ascendente
@@ -379,6 +420,10 @@ function calcular(){
   const body = $('resultBody');
   body.innerHTML = '';
 
+  if (rackDestino){
+    log(`Búsqueda acotada al Rack ${rackDestino} (cuerpo ${cuerpoDe(rackDestino)}) — sin expansión a otros bloques.`);
+  }
+
   // pallets ya asignados (modo "pendientes") se listan igual, de solo lectura
   const yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
   yaAsignados.forEach(p => body.appendChild(rowFor(p, p.ubicacion, 'ya asignado')));
@@ -386,7 +431,7 @@ function calcular(){
   let sinUbicacion = 0;
 
   pendientes.forEach(p => {
-    const resultado = buscarUbicacion(p, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal);
+    const resultado = buscarUbicacion(p, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal, rackDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
       body.appendChild(rowFor(p, resultado.ubicacion, 'asignado'));
@@ -414,9 +459,11 @@ function calcular(){
  *  - Respeta restricción de Dobles: no pueden coexistir código/lote/vencimiento distintos en A1/A2 (o par de nivel).
  *  - Respeta el rango de Nivel Inicio-Final elegido.
  */
-function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal){
+function buscarUbicacion(pallet, slots, byPosBase, byUbicacion, cuerpos, nivelInicio, nivelFinal, rackDestino){
   for (const cuerpo of cuerpos){
-    const candidatosCuerpo = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+    let candidatosCuerpo = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+    // Rack destino explícito: acota el cuerpo completo solo al Rack elegido.
+    if (rackDestino) candidatosCuerpo = candidatosCuerpo.filter(s => String(s.rack) === String(rackDestino));
     if (!candidatosCuerpo.length) continue;
 
     // Prioridad 1: apilar verticalmente junto al mismo código SAP ya almacenado en esa columna
