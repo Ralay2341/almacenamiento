@@ -176,13 +176,19 @@
     </div>
     <div class="row" style="margin-top:10px;">
       <div class="field" style="flex:2;min-width:200px;">
+        <label>Código SAP a asignar</label>
+        <select id="codigoDestino">
+          <option value="">Todos los pallets pendientes</option>
+        </select>
+      </div>
+      <div class="field" style="flex:2;min-width:200px;">
         <label>Rack destino</label>
         <select id="rackDestino">
           <option value="">Automático (busca por bloques, de menor a mayor)</option>
         </select>
       </div>
     </div>
-    <small class="note">Si elegís un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Se completa al cargar los datos.</small>
+    <small class="note">Si elegís un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si elegís un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Ambos se completan al cargar los datos.</small>
   </div>
 
   <div class="card">
@@ -294,6 +300,7 @@ async function loadData(){
     renderStats();
     renderPreview();
     poblarRacks();
+    poblarCodigos();
   }catch(err){
     log('Error al cargar datos: ' + err.message, 'err');
   }finally{
@@ -326,6 +333,32 @@ function poblarRacks(){
     sel.appendChild(opt);
   });
   if (racks.includes(valorPrevio)) sel.value = valorPrevio;
+}
+
+/** Llena el select "Código SAP a asignar" con los códigos reales de Import. */
+function poblarCodigos(){
+  const sel = $('codigoDestino');
+  const valorPrevio = sel.value;
+  const porCodigo = new Map(); // codSap -> { descripcion, total, pendientes }
+  importData.forEach(p => {
+    const cod = String(p.codSap || '').trim();
+    if (!cod) return;
+    if (!porCodigo.has(cod)) porCodigo.set(cod, { descripcion: p.descripcion, total: 0, pendientes: 0 });
+    const entry = porCodigo.get(cod);
+    entry.total++;
+    if (!p.ubicacion) entry.pendientes++;
+  });
+  const codigos = [...porCodigo.keys()].sort((a,b) => a.localeCompare(b, 'es', {numeric:true}));
+  sel.innerHTML = '<option value="">Todos los pallets pendientes</option>';
+  codigos.forEach(cod => {
+    const info = porCodigo.get(cod);
+    const opt = document.createElement('option');
+    opt.value = cod;
+    const desc = info.descripcion ? ` — ${info.descripcion}` : '';
+    opt.textContent = `${cod}${desc} (${info.pendientes} pend. / ${info.total} total)`;
+    sel.appendChild(opt);
+  });
+  if (codigos.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
 function renderPreview(){
@@ -432,6 +465,7 @@ function calcular(){
   const nivelFinal = $('nivelFinal').value;
   const modo = $('modoProceso').value;
   const rackDestino = $('rackDestino').value; // '' = automático (todos los cuerpos)
+  const codigoDestino = $('codigoDestino').value; // '' = todos los códigos
 
   // Copia de trabajo (no mutamos los datos originales cargados del Sheet)
   const slots = sincronizado.map(r => ({...r}));
@@ -455,7 +489,8 @@ function calcular(){
     ? [cuerpoDe(rackDestino)]
     : [...new Set(slots.map(s => cuerpoDe(s.rack)))].sort((a,b) => a-b);
 
-  const pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
+  let pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
+  if (codigoDestino) pendientes = pendientes.filter(p => String(p.codSap).trim() === codigoDestino);
   // Orden por Nº Pallet ascendente
   pendientes.sort((a,b) => String(a.nPallet).localeCompare(String(b.nPallet), 'es', {numeric:true}));
 
@@ -463,12 +498,16 @@ function calcular(){
   const body = $('resultBody');
   body.innerHTML = '';
 
+  if (codigoDestino){
+    log(`Procesando solo Cód. SAP ${codigoDestino} (${pendientes.length} pallet(s) pendiente(s)).`);
+  }
   if (rackDestino){
     log(`Búsqueda acotada al Rack ${normRack(rackDestino)} (cuerpo ${cuerpoDe(rackDestino)}) — sin expansión a otros bloques.`);
   }
 
   // pallets ya asignados (modo "pendientes") se listan igual, de solo lectura
-  const yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
+  let yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
+  if (codigoDestino) yaAsignados = yaAsignados.filter(p => String(p.codSap).trim() === codigoDestino);
   yaAsignados.forEach(p => body.appendChild(rowFor(p, p.ubicacion, 'ya asignado')));
 
   let sinUbicacion = 0;
