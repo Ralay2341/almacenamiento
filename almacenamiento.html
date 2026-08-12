@@ -152,13 +152,16 @@
     <div class="row">
       <div class="field" style="flex:3;min-width:220px;">
         <label>URL del Apps Script (Web App /exec)</label>
-        <input id="scriptUrl" type="text" placeholder="https://script.google.com/macros/s/XXXX/exec">
+        <div style="position:relative;">
+          <input id="scriptUrl" type="password" autocomplete="off" placeholder="https://script.google.com/macros/s/XXXX/exec" style="padding-right:38px;">
+          <button type="button" id="toggleUrlBtn" title="Mostrar/ocultar URL" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); background:transparent; border:none; padding:6px; font-size:16px; line-height:1;">👁</button>
+        </div>
       </div>
       <div class="field" style="flex:0 0 auto;">
         <button class="btn-secondary" id="saveUrlBtn">Guardar URL</button>
       </div>
     </div>
-    <small class="note">Se guarda solo en este dispositivo (localStorage). Ver Code.gs para desplegar el backend.</small>
+    <small class="note">Se guarda solo en este dispositivo (localStorage), y queda oculta en pantalla como una contraseña. Ver Code.gs para desplegar el backend.</small>
   </div>
 
   <div class="card">
@@ -290,6 +293,13 @@ $('saveUrlBtn').addEventListener('click', () => {
   SCRIPT_URL = $('scriptUrl').value.trim();
   localStorage.setItem('alm_storage_script_url', SCRIPT_URL);
   log('URL guardada.', 'ok');
+});
+
+$('toggleUrlBtn').addEventListener('click', () => {
+  const input = $('scriptUrl');
+  const oculto = input.type === 'password';
+  input.type = oculto ? 'text' : 'password';
+  $('toggleUrlBtn').textContent = oculto ? '🙈' : '👁';
 });
 
 /* ---------------- Carga de datos ---------------- */
