@@ -115,6 +115,7 @@
   }
   #log .err{color:var(--danger);}
   #log .ok{color:var(--accent2);}
+  #log .warn{color:var(--warn);}
 
   .footerbar{
     position:fixed; bottom:0; left:0; right:0;
@@ -296,9 +297,27 @@ async function loadData(){
   }
   $('loadBtn').disabled = true;
   log('Cargando datos desde Sincronizado e Import…');
+  const MAX_INTENTOS = 3;
   try{
-    const res = await fetch(`${SCRIPT_URL}?action=data`);
-    const data = await res.json();
+    let data = null;
+    let ultimoError = null;
+    for (let intento = 1; intento <= MAX_INTENTOS; intento++){
+      try{
+        // cache-buster: evita que el navegador sirva una respuesta vieja cacheada
+        const res = await fetch(`${SCRIPT_URL}?action=data&_=${Date.now()}`);
+        const texto = await res.text();
+        data = JSON.parse(texto); // si Apps Script devolvió HTML (cold start / error), esto tira excepción
+        ultimoError = null;
+        break;
+      }catch(err){
+        ultimoError = err;
+        if (intento < MAX_INTENTOS){
+          log(`Intento ${intento} falló (${err.message}). Reintentando en ${intento}s…`, 'warn');
+          await new Promise(r => setTimeout(r, intento * 1000));
+        }
+      }
+    }
+    if (ultimoError) throw ultimoError;
     if (data.error) throw new Error(data.error);
     sincronizado = data.sincronizado || [];
     importData = data.importData || [];
@@ -309,7 +328,8 @@ async function loadData(){
     poblarRacks();
     poblarCodigos();
   }catch(err){
-    log('Error al cargar datos: ' + err.message, 'err');
+    log('Error al cargar datos (tras varios intentos): ' + err.message, 'err');
+    log('Si persiste: abrí la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado en "despertar" — probá Cargar datos de nuevo.', 'err');
   }finally{
     $('loadBtn').disabled = false;
   }
