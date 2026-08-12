@@ -120,7 +120,11 @@
   .footerbar{
     position:fixed; bottom:0; left:0; right:0;
     background:rgba(13,17,23,.97); border-top:1px solid var(--border);
-    padding:10px 14px; display:flex; gap:8px; backdrop-filter:blur(6px);
+    padding:10px 14px; backdrop-filter:blur(6px);
+  }
+  .footerbar-inner{
+    max-width:1100px; margin:0 auto;
+    display:flex; gap:8px;
   }
   .footerbar button{
     flex:1 1 0; min-width:0; padding:8px 6px; font-size:13px;
@@ -242,9 +246,11 @@
 </main>
 
 <div class="footerbar">
-  <button class="btn-secondary" id="loadBtn">Cargar datos</button>
-  <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
-  <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
+  <div class="footerbar-inner">
+    <button class="btn-secondary" id="loadBtn">Cargar datos</button>
+    <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
+    <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
+  </div>
 </div>
 
 <script>
