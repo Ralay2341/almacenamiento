@@ -345,7 +345,7 @@ function poblarRacks(){
   racks.forEach(r => {
     const opt = document.createElement('option');
     opt.value = r;
-    opt.textContent = `Rack ${r} (cuerpo ${cuerpoDe(r)})`;
+    opt.textContent = `Rack ${r}`;
     sel.appendChild(opt);
   });
   if (racks.includes(valorPrevio)) sel.value = valorPrevio;
@@ -391,24 +391,25 @@ function renderPreview(){
 }
 
 /**
- * Revisa, dentro de un cuerpo (bloque de 3 Racks) y el rango de Nivel
- * Inicial-Final seleccionado, si el mismo Cód. SAP ya existe ahí, y si
- * todas esas ocurrencias comparten la misma Fecha de Vencimiento o no.
+ * Revisa, dentro de un bloque (3 Posiciones de un mismo Rack, con todos
+ * sus niveles) y el rango de Nivel Inicial-Final seleccionado, si el mismo
+ * Cód. SAP ya existe ahí, y si todas esas ocurrencias comparten la misma
+ * Fecha de Vencimiento o no.
  */
-function analizarCoincidenciaBloque(cuerpo, pallet, slots, nivelInicio, nivelFinal, rackDestino){
-  if (cuerpo == null) return null;
-  let candidatos = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
-  if (rackDestino) candidatos = candidatos.filter(s => normRack(s.rack) === normRack(rackDestino));
+function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivelFinal){
+  if (!bloqueKey) return null;
+  const candidatos = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloqueKey && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
   const mismoCodigo = candidatos.filter(s => s.codSap && s.codSap === pallet.codSap);
+  const etiqueta = bloqueKey.replace('|G', ', Bloque ');
   if (!mismoCodigo.length){
-    return { tipo: 'ninguna', cuerpo, texto: `Cuerpo ${cuerpo}: no hay otras unidades de este código en el rango de niveles.` };
+    return { tipo: 'ninguna', bloqueKey, texto: `Rack ${etiqueta}: no hay otras unidades de este código en el rango de niveles.` };
   }
   const fechas = [...new Set(mismoCodigo.map(s => s.vencimiento || '(sin fecha)'))];
   const todasIguales = fechas.length === 1 && fechas[0] === (pallet.vencimiento || '(sin fecha)');
   if (todasIguales){
-    return { tipo: 'misma_fecha', cuerpo, texto: `Cuerpo ${cuerpo}: mismo código ya presente (${mismoCodigo.length} ubic.), misma fecha de vencimiento (${fechas[0]}).` };
+    return { tipo: 'misma_fecha', bloqueKey, texto: `Rack ${etiqueta}: mismo código ya presente (${mismoCodigo.length} ubic.), misma fecha de vencimiento (${fechas[0]}).` };
   }
-  return { tipo: 'fecha_distinta', cuerpo, texto: `Cuerpo ${cuerpo}: mismo código presente con fecha DISTINTA (${fechas.join(', ')}) — atención con FEFO.` };
+  return { tipo: 'fecha_distinta', bloqueKey, texto: `Rack ${etiqueta}: mismo código presente con fecha DISTINTA (${fechas.join(', ')}) — atención con FEFO.` };
 }
 
 function rowFor(p, ubicPropuesta, estado, coincidencia){
@@ -475,10 +476,32 @@ function esc(v){
 
 $('calcBtn').addEventListener('click', calcular);
 
-function cuerpoDe(rack){
-  const n = Number(rack) || 0;
+/**
+ * Bloque = agrupación de 3 Posiciones (columna I / UBIC) DENTRO de un mismo
+ * Rack, con todos sus niveles. Ej: Rack 01, Posiciones 1-2-3 (con A1,A2,
+ * B1,B2...G1,G2) = Bloque 1 del Rack 01. Posiciones 4-5-6 = Bloque 2 del
+ * mismo Rack, y así sucesivamente — cada Rack (01 a 16) tiene sus propios
+ * bloques, empezando de nuevo desde el Bloque 1.
+ */
+function grupoUbic(ubic){
+  const n = Number(ubic) || 0;
   return Math.ceil(n / 3) || 1;
 }
+function bloqueDe(rack, ubic){
+  return `${normRack(rack)}|G${grupoUbic(ubic)}`;
+}
+/** Lista ordenada de bloques (Rack asc, luego Grupo asc) presentes en slots. */
+function listarBloques(slots, rackFiltro){
+  const set = new Map(); // key -> {rack, grupo}
+  slots.forEach(s => {
+    if (rackFiltro && normRack(s.rack) !== normRack(rackFiltro)) return;
+    const key = bloqueDe(s.rack, s.ubic);
+    if (!set.has(key)) set.set(key, { key, rack: normRack(s.rack), grupo: grupoUbic(s.ubic) });
+  });
+  return [...set.values()].sort((a,b) => (Number(a.rack) - Number(b.rack)) || (a.grupo - b.grupo));
+}
+
+
 
 /** Normaliza un número de Rack a 2 dígitos (01..16), tolerando que la
  * hoja lo devuelva como número (5) o como texto con cero adelante ("05"). */
@@ -530,12 +553,10 @@ function calcular(){
     byNivelPar.get(parKey).push(s);
   });
 
-  // Cuerpos a revisar, ascendente (punto e: revisión de menor a mayor).
-  // Si se eligió un Rack destino específico, la búsqueda queda acotada
-  // solo a ese Rack (no se expande a otros bloques).
-  const cuerpos = rackDestino
-    ? [cuerpoDe(rackDestino)]
-    : [...new Set(slots.map(s => cuerpoDe(s.rack)))].sort((a,b) => a-b);
+  // Bloques a revisar, ascendente (Rack asc, luego Grupo de 3 posiciones asc
+  // DENTRO de ese Rack). Si se eligió un Rack destino, la búsqueda queda
+  // acotada a los bloques de ese Rack únicamente (no expande a otros Racks).
+  const bloques = listarBloques(slots, rackDestino);
 
   let pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
   if (codigoDestino) pendientes = pendientes.filter(p => String(p.codSap).trim() === codigoDestino);
@@ -550,7 +571,7 @@ function calcular(){
     log(`Procesando solo Cód. SAP ${codigoDestino} (${pendientes.length} pallet(s) pendiente(s)).`);
   }
   if (rackDestino){
-    log(`Búsqueda acotada al Rack ${normRack(rackDestino)} (cuerpo ${cuerpoDe(rackDestino)}) — sin expansión a otros bloques.`);
+    log(`Búsqueda acotada al Rack ${normRack(rackDestino)} (todos sus bloques internos de a 3 posiciones) — sin expansión a otros Racks.`);
   }
 
   // pallets ya asignados (modo "pendientes") se listan igual, de solo lectura
@@ -561,10 +582,10 @@ function calcular(){
   let sinUbicacion = 0;
 
   pendientes.forEach(p => {
-    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, cuerpos, nivelInicio, nivelFinal, rackDestino);
+    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
-      const coincidencia = analizarCoincidenciaBloque(resultado.cuerpo, p, slots, nivelInicio, nivelFinal, rackDestino);
+      const coincidencia = analizarCoincidenciaBloque(resultado.bloqueKey, p, slots, nivelInicio, nivelFinal);
       body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', coincidencia));
       log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
       if (coincidencia && coincidencia.tipo === 'fecha_distinta'){
@@ -572,10 +593,9 @@ function calcular(){
       }
     } else {
       sinUbicacion++;
-      // Sin asignación: si hay Rack destino, igual informamos la coincidencia en ese cuerpo
-      const cuerpoRef = rackDestino ? cuerpoDe(rackDestino) : null;
-      const coincidencia = analizarCoincidenciaBloque(cuerpoRef, p, slots, nivelInicio, nivelFinal, rackDestino);
-      body.appendChild(rowFor(p, '', 'sin ubicación disponible', coincidencia));
+      // Sin asignación no hay un bloque concreto que informar (la búsqueda
+      // recorrió todos los bloques disponibles sin éxito).
+      body.appendChild(rowFor(p, '', 'sin ubicación disponible', null));
       log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN DISPONIBLE`, 'err');
     }
   });
@@ -592,21 +612,20 @@ function calcular(){
 
 /**
  * Busca la mejor ubicación para un pallet dentro de las reglas:
- *  - Por bloques (cuerpos) ascendente, tipo árbol (expande al siguiente cuerpo si no hay).
+ *  - Por bloques ascendente (Rack asc, luego grupo de 3 Posiciones asc
+ *    DENTRO de ese Rack), tipo árbol (expande al siguiente bloque si no hay).
  *  - Prioriza apilar VERTICALMENTE junto al mismo código SAP (misma columna rack/ubic, distinto nivel).
  *  - Respeta restricción de Dobles: no pueden coexistir código/lote/vencimiento distintos en A1/A2 (o par de nivel).
  *  - Respeta el rango de Nivel Inicio-Final elegido.
  */
-function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, cuerpos, nivelInicio, nivelFinal, rackDestino){
-  for (const cuerpo of cuerpos){
-    let candidatosCuerpo = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
-    // Rack destino explícito: acota el cuerpo completo solo al Rack elegido.
-    if (rackDestino) candidatosCuerpo = candidatosCuerpo.filter(s => normRack(s.rack) === normRack(rackDestino));
-    if (!candidatosCuerpo.length) continue;
+function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal){
+  for (const bloque of bloques){
+    const candidatosBloque = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+    if (!candidatosBloque.length) continue;
 
     // Prioridad 1: apilar verticalmente junto al mismo código SAP ya almacenado en esa columna
     const columnasConMismoCodigo = new Set(
-      candidatosCuerpo.filter(s => s.codSap === pallet.codSap).map(s => `${s.rack}|${s.ubic}`)
+      candidatosBloque.filter(s => s.codSap === pallet.codSap).map(s => `${s.rack}|${s.ubic}`)
     );
     for (const posKey of columnasConMismoCodigo){
       const columna = (byPosBase.get(posKey) || []).filter(s => enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
@@ -615,33 +634,33 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, cuerpos, nivelIni
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
-          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código', cuerpo: cuerpo, rack: slot.rack };
+          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
         }
       }
     }
 
     // Prioridad 2: locaciones tipo PICKING libres del mismo código (más cercanas al picking)
-    const picking = candidatosCuerpo
+    const picking = candidatosBloque
       .filter(s => s.tipo === 'PICKING' && s.codSap === pallet.codSap)
-      .sort((a,b) => a.rack - b.rack);
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)));
     for (const slot of picking){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING', cuerpo: cuerpo, rack: slot.rack };
+        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
       }
     }
 
-    // Prioridad 3: cualquier ubicación libre y compatible dentro del cuerpo, rack/ubic/nivel ascendente
-    const libres = candidatosCuerpo
+    // Prioridad 3: cualquier ubicación libre y compatible dentro del bloque, ubic/nivel ascendente
+    const libres = candidatosBloque
       .slice()
-      .sort((a,b) => (a.rack - b.rack) || String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
     for (const slot of libres){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: `cuerpo ${cuerpo}, primera disponible`, cuerpo: cuerpo, rack: slot.rack };
+        return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, primera disponible`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
       }
     }
-    // nada en este cuerpo -> el for externo sigue al próximo cuerpo (búsqueda tipo árbol)
+    // nada en este bloque -> el for externo sigue al próximo bloque (búsqueda tipo árbol)
   }
   return null;
 }
