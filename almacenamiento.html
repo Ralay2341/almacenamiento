@@ -147,22 +147,6 @@
 
 <main>
 
-  <div class="card" id="cfgCard">
-    <h2>Conexión</h2>
-    <div class="row">
-      <div class="field" style="flex:3;min-width:220px;">
-        <label>URL del Apps Script (Web App /exec)</label>
-        <div style="position:relative;">
-          <input id="scriptUrl" type="password" autocomplete="off" placeholder="https://script.google.com/macros/s/XXXX/exec" style="padding-right:38px;">
-          <button type="button" id="toggleUrlBtn" title="Mostrar/ocultar URL" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); background:transparent; border:none; padding:6px; font-size:16px; line-height:1;">👁</button>
-        </div>
-      </div>
-      <div class="field" style="flex:0 0 auto;">
-        <button class="btn-secondary" id="saveUrlBtn">Guardar URL</button>
-      </div>
-    </div>
-    <small class="note">Se guarda solo en este dispositivo (localStorage), y queda oculta en pantalla como una contraseña. Ver Code.gs para desplegar el backend.</small>
-  </div>
 
   <div class="card">
     <h2>Parámetros de búsqueda</h2>
@@ -262,8 +246,9 @@
    Lógica de asignación de ubicaciones (heurística, ver notas).
    ============================================================ */
 
-let SCRIPT_URL = localStorage.getItem('alm_storage_script_url') || '';
-document.getElementById('scriptUrl').value = SCRIPT_URL;
+// URL del Web App de Apps Script (ver Code.gs para desplegar el backend).
+// Va fija acá para no tener que pegarla cada vez que se abre la app.
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyg67Tl2muKyB1jsAc714rf-WsU9AHkgyDFrASVF2vzmSUlgzgGCsDJj0ppm9LG2P6P/exec';
 
 /* Cualquier error de JS que antes quedaba "silencioso" (la pantalla se
    quedaba en "Esperando acción…" sin explicar por qué) ahora se ve acá. */
@@ -289,26 +274,14 @@ function log(msg, cls){
   el.prepend(line);
 }
 
-$('saveUrlBtn').addEventListener('click', () => {
-  SCRIPT_URL = $('scriptUrl').value.trim();
-  localStorage.setItem('alm_storage_script_url', SCRIPT_URL);
-  log('URL guardada.', 'ok');
-});
-
-$('toggleUrlBtn').addEventListener('click', () => {
-  const input = $('scriptUrl');
-  const oculto = input.type === 'password';
-  input.type = oculto ? 'text' : 'password';
-  $('toggleUrlBtn').textContent = oculto ? '🙈' : '👁';
-});
 
 /* ---------------- Carga de datos ---------------- */
 
 $('loadBtn').addEventListener('click', loadData);
 
 async function loadData(){
-  if (!SCRIPT_URL){
-    log('Primero configurá y guardá la URL del Apps Script.', 'err');
+  if (!SCRIPT_URL || SCRIPT_URL.includes('XXXX')){
+    log('Falta configurar SCRIPT_URL en el código (const SCRIPT_URL al inicio del <script>).', 'err');
     return;
   }
   $('loadBtn').disabled = true;
