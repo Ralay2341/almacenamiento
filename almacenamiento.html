@@ -119,9 +119,15 @@
   .footerbar{
     position:fixed; bottom:0; left:0; right:0;
     background:rgba(13,17,23,.97); border-top:1px solid var(--border);
-    padding:10px 14px; display:flex; gap:10px; backdrop-filter:blur(6px);
+    padding:10px 14px; display:flex; gap:8px; backdrop-filter:blur(6px);
   }
-  .footerbar button{flex:1;}
+  .footerbar button{
+    flex:1 1 0; min-width:0; padding:11px 6px;
+    white-space:normal; line-height:1.2; text-align:center;
+  }
+  @media (max-width:380px){
+    .footerbar button{font-size:12.5px; padding:10px 4px;}
+  }
 
   .empty{color:var(--dim); font-size:13px; text-align:center; padding:24px 10px;}
   small.note{color:var(--dim); font-size:11px; display:block; margin-top:6px;}
