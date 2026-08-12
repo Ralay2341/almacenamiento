@@ -41,7 +41,8 @@
     font-size:10px; font-weight:700; letter-spacing:1px;
     background:var(--accent); color:#241100; padding:2px 7px; border-radius:5px;
   }
-  header p{margin:4px 0 0; font-size:12px; color:var(--dim);}
+  header p{margin:4px 0 0; font-size:12px; color:var(--dim); display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;}
+  header .propiedad{font-size:11px; color:var(--dim); opacity:.8; white-space:nowrap;}
 
   main{padding:14px 14px 90px; max-width:1100px; margin:0 auto;}
 
@@ -130,7 +131,7 @@
 
 <header>
   <h1>Almacenamiento <span class="tag">ALM9037</span></h1>
-  <p>Asignación óptima de ubicaciones para pallets de Import</p>
+  <p><span>Asignación óptima de ubicaciones para pallets de Import</span><span class="propiedad">Propiedad de: Raúl Layseca Beas (Ley 17.336)</span></p>
 </header>
 
 <main>
@@ -146,7 +147,7 @@
         <button class="btn-secondary" id="saveUrlBtn">Guardar URL</button>
       </div>
     </div>
-    <small class="note">Se guarda solo en este dispositivo (localStorage).</small>
+    <small class="note">Se guarda solo en este dispositivo (localStorage). Ver Code.gs para desplegar el backend.</small>
   </div>
 
   <div class="card">
@@ -188,7 +189,7 @@
         </select>
       </div>
     </div>
-    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Ambos se completan al cargar los datos.</small>
+    <small class="note">Si elegís un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si elegís un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Ambos se completan al cargar los datos.</small>
   </div>
 
   <div class="card">
@@ -215,11 +216,11 @@
         <thead>
           <tr>
             <th>Pallet</th><th>Cod SAP</th><th>Descripción</th><th>Lote</th>
-            <th>Venc.</th><th>Cant.</th><th>Ubic. actual</th><th>Ubic. propuesta</th><th>Estado</th>
+            <th>Venc.</th><th>Cant.</th><th>Ubic. actual</th><th>Ubic. propuesta</th><th>Estado</th><th>Coincidencia en bloque</th>
           </tr>
         </thead>
         <tbody id="resultBody">
-          <tr><td colspan="9" class="empty">Cargá los datos para ver resultados.</td></tr>
+          <tr><td colspan="10" class="empty">Cargá los datos para ver resultados.</td></tr>
         </tbody>
       </table>
     </div>
@@ -365,7 +366,7 @@ function renderPreview(){
   const body = $('resultBody');
   body.innerHTML = '';
   if (!importData.length){
-    body.innerHTML = '<tr><td colspan="9" class="empty">No hay pallets en Import.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty">No hay pallets en Import.</td></tr>';
     return;
   }
   importData.forEach(p => {
@@ -374,13 +375,44 @@ function renderPreview(){
   aplicarFiltroCodSap();
 }
 
-function rowFor(p, ubicPropuesta, estado){
+/**
+ * Revisa, dentro de un cuerpo (bloque de 3 Racks) y el rango de Nivel
+ * Inicial-Final seleccionado, si el mismo Cód. SAP ya existe ahí, y si
+ * todas esas ocurrencias comparten la misma Fecha de Vencimiento o no.
+ */
+function analizarCoincidenciaBloque(cuerpo, pallet, slots, nivelInicio, nivelFinal, rackDestino){
+  if (cuerpo == null) return null;
+  let candidatos = slots.filter(s => cuerpoDe(s.rack) === cuerpo && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+  if (rackDestino) candidatos = candidatos.filter(s => normRack(s.rack) === normRack(rackDestino));
+  const mismoCodigo = candidatos.filter(s => s.codSap && s.codSap === pallet.codSap);
+  if (!mismoCodigo.length){
+    return { tipo: 'ninguna', cuerpo, texto: `Cuerpo ${cuerpo}: no hay otras unidades de este código en el rango de niveles.` };
+  }
+  const fechas = [...new Set(mismoCodigo.map(s => s.vencimiento || '(sin fecha)'))];
+  const todasIguales = fechas.length === 1 && fechas[0] === (pallet.vencimiento || '(sin fecha)');
+  if (todasIguales){
+    return { tipo: 'misma_fecha', cuerpo, texto: `Cuerpo ${cuerpo}: mismo código ya presente (${mismoCodigo.length} ubic.), misma fecha de vencimiento (${fechas[0]}).` };
+  }
+  return { tipo: 'fecha_distinta', cuerpo, texto: `Cuerpo ${cuerpo}: mismo código presente con fecha DISTINTA (${fechas.join(', ')}) — atención con FEFO.` };
+}
+
+function rowFor(p, ubicPropuesta, estado, coincidencia){
   const tr = document.createElement('tr');
   tr.dataset.codsap = String(p.codSap || '').toUpperCase();
   const pillClass = estado === 'asignado' ? 'ok'
                     : estado === 'ya asignado' ? 'muted'
                     : estado === 'sin ubicación disponible' ? 'danger'
                     : 'warn';
+  let coincidenciaHtml = '<span style="color:var(--dim)">—</span>';
+  if (coincidencia){
+    const coincClass = coincidencia.tipo === 'fecha_distinta' ? 'danger'
+                      : coincidencia.tipo === 'misma_fecha' ? 'ok'
+                      : 'muted';
+    const coincTexto = coincidencia.tipo === 'fecha_distinta' ? '⚠ Fecha distinta'
+                      : coincidencia.tipo === 'misma_fecha' ? '✓ Misma fecha'
+                      : 'Sin coincidencia';
+    coincidenciaHtml = `<span class="pill ${coincClass}" title="${esc(coincidencia.texto)}">${coincTexto}</span>`;
+  }
   tr.innerHTML = `
     <td>${esc(p.nPallet)}</td>
     <td>${esc(p.codSap)}</td>
@@ -391,6 +423,7 @@ function rowFor(p, ubicPropuesta, estado){
     <td>${esc(p.ubicacion) || '<span style="color:var(--dim)">—</span>'}</td>
     <td><input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}"></td>
     <td><span class="pill ${pillClass}">${estado}</span></td>
+    <td>${coincidenciaHtml}</td>
   `;
   return tr;
 }
@@ -516,11 +549,18 @@ function calcular(){
     const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, cuerpos, nivelInicio, nivelFinal, rackDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
-      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado'));
+      const coincidencia = analizarCoincidenciaBloque(resultado.cuerpo, p, slots, nivelInicio, nivelFinal, rackDestino);
+      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', coincidencia));
       log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
+      if (coincidencia && coincidencia.tipo === 'fecha_distinta'){
+        log(`  ⚠ ${coincidencia.texto}`, 'err');
+      }
     } else {
       sinUbicacion++;
-      body.appendChild(rowFor(p, '', 'sin ubicación disponible'));
+      // Sin asignación: si hay Rack destino, igual informamos la coincidencia en ese cuerpo
+      const cuerpoRef = rackDestino ? cuerpoDe(rackDestino) : null;
+      const coincidencia = analizarCoincidenciaBloque(cuerpoRef, p, slots, nivelInicio, nivelFinal, rackDestino);
+      body.appendChild(rowFor(p, '', 'sin ubicación disponible', coincidencia));
       log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN DISPONIBLE`, 'err');
     }
   });
@@ -560,7 +600,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, cuerpos, nivelIni
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
-          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código' };
+          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código', cuerpo: cuerpo, rack: slot.rack };
         }
       }
     }
@@ -572,7 +612,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, cuerpos, nivelIni
     for (const slot of picking){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING' };
+        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING', cuerpo: cuerpo, rack: slot.rack };
       }
     }
 
@@ -583,7 +623,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, cuerpos, nivelIni
     for (const slot of libres){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: `cuerpo ${cuerpo}, primera disponible` };
+        return { ubicacion: slot.ubicacion, motivo: `cuerpo ${cuerpo}, primera disponible`, cuerpo: cuerpo, rack: slot.rack };
       }
     }
     // nada en este cuerpo -> el for externo sigue al próximo cuerpo (búsqueda tipo árbol)
