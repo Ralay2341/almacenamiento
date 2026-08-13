@@ -656,14 +656,41 @@ function calcular(){
  *  - Respeta restricción de Dobles: no pueden coexistir código/lote/vencimiento distintos en A1/A2 (o par de nivel).
  *  - Respeta el rango de Nivel Inicio-Final elegido.
  */
+/**
+ * Busca la mejor ubicación para un pallet en DOS PASADAS:
+ *
+ * PASADA 1 — bloques con el MISMO código Y misma fecha de vencimiento ya
+ * presentes (en cualquier posición del bloque, tipo DOBLE/SIMPLE/BAJO/
+ * PICKING/PILAR), recorridos ascendente (Rack asc, luego grupo de 3
+ * Posiciones asc DENTRO del Rack). Dentro de un bloque así:
+ *   1a. Apilar verticalmente en la misma columna (Rack+Posición) si hay nivel libre.
+ *   1b. Si no, cualquier otra ubicación libre y compatible dentro de ESE MISMO bloque
+ *       (se prioriza el bloque que ya tiene el producto antes que saltar a otro).
+ *
+ * PASADA 2 — si ningún bloque con coincidencia sirvió, se recorre TODO de
+ * nuevo ascendente sin exigir coincidencia previa: ubicación PICKING del
+ * mismo código, y si no, cualquier ubicación libre y compatible.
+ *
+ * En todos los casos: se respeta el rango Nivel Inicio-Final, el Tipo de
+ * Rack elegido (si hay), y la restricción de pares Doble (Frente/Fondo
+ * mismo código+lote+fecha, y cantidad Frente<=Fondo) vía slotUtilizable().
+ */
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
+  const candidatosDe = (bloque) => {
+    let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+    if (tipoDestino) c = c.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
+    return c;
+  };
+
+  // ---------- PASADA 1: bloques que ya tienen el mismo código + misma fecha ----------
   for (const bloque of bloques){
-    let candidatosBloque = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
-    if (tipoDestino) candidatosBloque = candidatosBloque.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
+    const candidatosBloque = candidatosDe(bloque);
     if (!candidatosBloque.length) continue;
 
-    // Prioridad 1: apilar verticalmente junto al mismo código SAP Y misma fecha
-    // de vencimiento ya almacenados en esa columna (Rack destino + misma columna)
+    const hayCoincidencia = candidatosBloque.some(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento);
+    if (!hayCoincidencia) continue; // este bloque no tiene el producto: se revisa recién en la Pasada 2
+
+    // 1a. Apilar verticalmente en la misma columna del match
     const columnasConMismoCodigo = new Set(
       candidatosBloque
         .filter(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento)
@@ -671,7 +698,6 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     );
     for (const posKey of columnasConMismoCodigo){
       const columna = (byPosBase.get(posKey) || []).filter(s => enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal) && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
-      // niveles ascendentes dentro de la misma columna
       columna.sort((a,b) => LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel)));
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
@@ -681,7 +707,26 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
       }
     }
 
-    // Prioridad 2: locaciones tipo PICKING libres del mismo código (más cercanas al picking)
+    // 1b. Cualquier otra ubicación libre y compatible dentro del MISMO bloque
+    // (ya sabemos que este bloque tiene el producto — se prioriza sobre saltar a otro bloque)
+    const libresEnBloqueConMatch = candidatosBloque
+      .slice()
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
+    for (const slot of libresEnBloqueConMatch){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, mismo código y fecha en el bloque`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
+      }
+    }
+    // este bloque tenía el producto pero no logró ubicar (dobles incompatibles, etc.) -> sigue al próximo bloque con match
+  }
+
+  // ---------- PASADA 2: fallback ascendente, sin exigir coincidencia previa ----------
+  for (const bloque of bloques){
+    const candidatosBloque = candidatosDe(bloque);
+    if (!candidatosBloque.length) continue;
+
+    // Ubicación tipo PICKING libre del mismo código
     const picking = candidatosBloque
       .filter(s => s.tipo === 'PICKING' && s.codSap === pallet.codSap)
       .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)));
@@ -692,7 +737,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
       }
     }
 
-    // Prioridad 3: cualquier ubicación libre y compatible dentro del bloque, ubic/nivel ascendente
+    // Cualquier ubicación libre y compatible dentro del bloque
     const libres = candidatosBloque
       .slice()
       .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
@@ -702,7 +747,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
         return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, primera disponible`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
       }
     }
-    // nada en este bloque -> el for externo sigue al próximo bloque (búsqueda tipo árbol)
+    // nada en este bloque -> el for sigue al próximo bloque (búsqueda tipo árbol)
   }
   return null;
 }
