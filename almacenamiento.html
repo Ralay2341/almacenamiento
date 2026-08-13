@@ -662,9 +662,12 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     if (tipoDestino) candidatosBloque = candidatosBloque.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
     if (!candidatosBloque.length) continue;
 
-    // Prioridad 1: apilar verticalmente junto al mismo código SAP ya almacenado en esa columna
+    // Prioridad 1: apilar verticalmente junto al mismo código SAP Y misma fecha
+    // de vencimiento ya almacenados en esa columna (Rack destino + misma columna)
     const columnasConMismoCodigo = new Set(
-      candidatosBloque.filter(s => s.codSap === pallet.codSap).map(s => `${s.rack}|${s.ubic}`)
+      candidatosBloque
+        .filter(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento)
+        .map(s => `${s.rack}|${s.ubic}`)
     );
     for (const posKey of columnasConMismoCodigo){
       const columna = (byPosBase.get(posKey) || []).filter(s => enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal) && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
@@ -673,7 +676,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
-          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
+          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código y misma fecha', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
         }
       }
     }
@@ -706,12 +709,17 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
 
 /**
  * Un slot es utilizable si está vacío y, si tiene "par" (Frente/Fondo del
- * mismo Rack+Ubic+Nivel, ej. A1/A2), el par cumple la restricción:
+ * mismo Rack+Ubic+Nivel, ej. A1/A2), el par cumple las restricciones:
  *  - Si el par está vacío -> se puede asignar sin problema.
  *  - Si el par está ocupado -> SOLO se puede asignar si es exactamente el
  *    mismo Cód. SAP + Lote + Fecha de Vencimiento (no se mezclan productos
  *    distintos en el mismo par, en ninguna de las dos direcciones:
  *    A1 vacío/A2 ocupado, o A2 vacío/A1 ocupado).
+ *  - Además, en racks TIPO DOBLE: el Frente (profundidad 1) debe llevar
+ *    cantidad MENOR O IGUAL que el Fondo (profundidad 2). Si el Fondo ya
+ *    está ocupado y se va a llenar el Frente, la cantidad del pallet debe
+ *    ser <= la cantidad del Fondo. Si el Frente ya está ocupado y se va a
+ *    llenar el Fondo, la cantidad del pallet debe ser >= la del Frente.
  */
 function slotUtilizable(slot, pallet, byNivelPar){
   if (slot.codSap) return false; // ya ocupado
@@ -721,7 +729,17 @@ function slotUtilizable(slot, pallet, byNivelPar){
   for (const otro of par){
     if (!otro.codSap) continue; // el par está vacío, no hay conflicto
     const mismoProducto = otro.codSap === pallet.codSap && otro.lote === pallet.lote && otro.vencimiento === pallet.vencimiento;
-    if (!mismoProducto) return false; // restricción c): no pueden coexistir código/lote/vencimiento distintos
+    if (!mismoProducto) return false; // restricción: no pueden coexistir código/lote/vencimiento distintos
+
+    // Regla de cantidad Frente <= Fondo, solo aplica a TIPO DOBLE
+    if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
+      const profSlot = nivelProfundidad(slot.nivel);
+      const profOtro = nivelProfundidad(otro.nivel);
+      const cantPallet = Number(pallet.disponible) || 0;
+      const cantOtro = Number(otro.cant) || 0;
+      if (profSlot === '1' && profOtro === '2' && cantPallet > cantOtro) return false; // Frente debe ser <= Fondo
+      if (profSlot === '2' && profOtro === '1' && cantPallet < cantOtro) return false; // Fondo debe ser >= Frente
+    }
   }
   return true;
 }
@@ -730,6 +748,7 @@ function ocuparSlot(slot, pallet){
   slot.codSap = pallet.codSap;
   slot.lote = pallet.lote;
   slot.vencimiento = pallet.vencimiento;
+  slot.cant = Number(pallet.disponible) || 0;
 }
 
 /* ---------------- Guardado en Sheet ---------------- */
