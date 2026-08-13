@@ -819,9 +819,9 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
  * mismo Rack+Ubic+Nivel, ej. A1/A2), el par cumple las restricciones:
  *  - Si el par está vacío -> se puede asignar sin problema.
  *  - Si el par está ocupado -> SOLO se puede asignar si es exactamente el
- *    mismo Cód. SAP + Lote + Fecha de Vencimiento (no se mezclan productos
+ *    mismo Cód. SAP + Fecha de Vencimiento (no se mezclan productos
  *    distintos en el mismo par, en ninguna de las dos direcciones:
- *    A1 vacío/A2 ocupado, o A2 vacío/A1 ocupado).
+ *    A1 vacío/A2 ocupado, o A2 vacío/A1 ocupado). El Lote NO se exige.
  *  - Además, en racks TIPO DOBLE: el Frente (profundidad 1) debe llevar
  *    cantidad MENOR O IGUAL que el Fondo (profundidad 2). Si el Fondo ya
  *    está ocupado y se va a llenar el Frente, la cantidad del pallet debe
@@ -835,8 +835,8 @@ function slotUtilizable(slot, pallet, byNivelPar){
   if (!par.length) return true; // Simple/Bajo/Pilar/Picking sin par
   for (const otro of par){
     if (!otro.codSap) continue; // el par está vacío, no hay conflicto
-    const mismoProducto = otro.codSap === pallet.codSap && otro.lote === pallet.lote && otro.vencimiento === pallet.vencimiento;
-    if (!mismoProducto) return false; // restricción: no pueden coexistir código/lote/vencimiento distintos
+    const mismoProducto = otro.codSap === pallet.codSap && otro.vencimiento === pallet.vencimiento;
+    if (!mismoProducto) return false; // restricción: no pueden coexistir código/vencimiento distintos
 
     // Regla de cantidad Frente <= Fondo, solo aplica a TIPO DOBLE
     if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
