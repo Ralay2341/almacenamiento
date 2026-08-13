@@ -276,6 +276,44 @@ function log(msg, cls){
   el.prepend(line);
 }
 
+/* ---------------- Utilidades de Nivel (letra + profundidad) ---------------- */
+// Deben ir ANTES de cualquier función que se ejecute al cargar la página
+// (poblarTipos/actualizarOpcionesNivel se llaman de entrada).
+
+function nivelLetra(nivel){
+  return String(nivel || '').trim().charAt(0).toUpperCase();
+}
+function nivelProfundidad(nivel){
+  const s = String(nivel || '').trim();
+  return s.length > 1 ? s.charAt(1) : '1';
+}
+/** Nivel completo (letra + profundidad), ej: "A1", "A2", "G2". */
+function nivelCompleto(nivel){
+  return nivelLetra(nivel) + nivelProfundidad(nivel);
+}
+const LETRAS = ['A','B','C','D','E','F','G'];
+// A1,A2,B1,B2,...,G1,G2 (para racks TIPO DOBLE: el rango de Nivel incluye Frente/Fondo)
+const NIVELES_DOBLE = LETRAS.flatMap(l => [l+'1', l+'2']);
+
+/**
+ * ¿El nivel de un slot cae dentro del rango elegido? Detecta automáticamente
+ * si el rango es "simple" (A..G, ej. inicio="A") o "doble" (A1..G2, ej.
+ * inicio="A1") según el formato de inicio/fin, y compara en consecuencia.
+ */
+function enRango(nivelSlot, inicio, fin){
+  const esDoble = /^[A-G][12]$/.test(inicio) || /^[A-G][12]$/.test(fin);
+  if (esDoble){
+    const completo = nivelCompleto(nivelSlot);
+    const i = NIVELES_DOBLE.indexOf(inicio), f = NIVELES_DOBLE.indexOf(fin), l = NIVELES_DOBLE.indexOf(completo);
+    if (i === -1 || f === -1 || l === -1) return true;
+    return l >= Math.min(i,f) && l <= Math.max(i,f);
+  }
+  const letra = nivelLetra(nivelSlot);
+  const i = LETRAS.indexOf(inicio), f = LETRAS.indexOf(fin), l = LETRAS.indexOf(letra);
+  if (i === -1 || f === -1 || l === -1) return true;
+  return l >= Math.min(i,f) && l <= Math.max(i,f);
+}
+
 
 /* ---------------- Carga de datos ---------------- */
 
@@ -583,39 +621,7 @@ function normRack(rack){
   return s;
 }
 
-function nivelLetra(nivel){
-  return String(nivel || '').trim().charAt(0).toUpperCase();
-}
-function nivelProfundidad(nivel){
-  const s = String(nivel || '').trim();
-  return s.length > 1 ? s.charAt(1) : '1';
-}
-/** Nivel completo (letra + profundidad), ej: "A1", "A2", "G2". */
-function nivelCompleto(nivel){
-  return nivelLetra(nivel) + nivelProfundidad(nivel);
-}
-const LETRAS = ['A','B','C','D','E','F','G'];
-// A1,A2,B1,B2,...,G1,G2 (para racks TIPO DOBLE: el rango de Nivel incluye Frente/Fondo)
-const NIVELES_DOBLE = LETRAS.flatMap(l => [l+'1', l+'2']);
 
-/**
- * ¿El nivel de un slot cae dentro del rango elegido? Detecta automáticamente
- * si el rango es "simple" (A..G, ej. inicio="A") o "doble" (A1..G2, ej.
- * inicio="A1") según el formato de inicio/fin, y compara en consecuencia.
- */
-function enRango(nivelSlot, inicio, fin){
-  const esDoble = /^[A-G][12]$/.test(inicio) || /^[A-G][12]$/.test(fin);
-  if (esDoble){
-    const completo = nivelCompleto(nivelSlot);
-    const i = NIVELES_DOBLE.indexOf(inicio), f = NIVELES_DOBLE.indexOf(fin), l = NIVELES_DOBLE.indexOf(completo);
-    if (i === -1 || f === -1 || l === -1) return true;
-    return l >= Math.min(i,f) && l <= Math.max(i,f);
-  }
-  const letra = nivelLetra(nivelSlot);
-  const i = LETRAS.indexOf(inicio), f = LETRAS.indexOf(fin), l = LETRAS.indexOf(letra);
-  if (i === -1 || f === -1 || l === -1) return true;
-  return l >= Math.min(i,f) && l <= Math.max(i,f);
-}
 
 function calcular(){
   if (!sincronizado.length){
