@@ -319,6 +319,7 @@ async function loadData(){
     poblarRacks();
     poblarCodigos();
     poblarTipos();
+    actualizarOpcionesNivel();
   }catch(err){
     log('Error al cargar datos (tras varios intentos): ' + err.message, 'err');
     log('Si persiste: abrí la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado en "despertar" — probá Cargar datos de nuevo.', 'err');
@@ -406,13 +407,29 @@ function poblarTipos(){
 }
 
 /**
- * Nivel Inicio/Final cambian según el Tipo de Rack elegido:
- *  - TIPO = DOBLE -> A1,A2,B1,B2...G1,G2 (incluye Frente/Fondo).
- *  - Cualquier otro caso (Todos, SIMPLE, BAJO, PICKING, PILAR) -> A,B,C...G.
+ * Nivel Inicio/Final cambian según corresponda:
+ *  - Rack SIMPLE -> A, B, C ... G.
+ *  - Rack DOBLE  -> A1, A2, B1, B2 ... G1, G2 (Frente/Fondo por separado).
+ * Prioridad para decidir cuál usar:
+ *  1. Si hay un "Tipo de Rack" elegido explícitamente (SIMPLE/DOBLE/BAJO/PICKING/PILAR), se usa ese.
+ *  2. Si no, pero hay un "Rack destino" elegido, se detecta el tipo real mirando los
+ *     datos de Sincronizado para ese Rack (si tiene alguna posición DOBLE, se usa formato Doble).
+ *  3. Si ninguno está elegido ("Todos"), formato simple A..G por defecto.
  */
+function esRackConDoble(rack){
+  return sincronizado.some(s => normRack(s.rack) === normRack(rack) && String(s.tipo).trim().toUpperCase() === 'DOBLE');
+}
 function actualizarOpcionesNivel(){
   const tipo = $('tipoDestino') ? $('tipoDestino').value : '';
-  const esDoble = tipo === 'DOBLE';
+  const rack = $('rackDestino') ? $('rackDestino').value : '';
+  let esDoble;
+  if (tipo){
+    esDoble = tipo === 'DOBLE';
+  } else if (rack){
+    esDoble = esRackConDoble(rack);
+  } else {
+    esDoble = false;
+  }
   const inicioSel = $('nivelInicio');
   const finalSel = $('nivelFinal');
   const prevInicio = inicioSel.value;
@@ -427,7 +444,8 @@ function actualizarOpcionesNivel(){
   finalSel.value = opciones.includes(prevFinal) ? prevFinal : opciones[opciones.length - 1];
 }
 $('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
-actualizarOpcionesNivel(); // estado inicial (Todos los tipos -> A..G)
+$('rackDestino') && $('rackDestino').addEventListener('change', actualizarOpcionesNivel);
+actualizarOpcionesNivel(); // estado inicial (nada elegido -> A..G)
 
 function renderPreview(){
   const body = $('resultBody');
