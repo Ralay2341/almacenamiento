@@ -153,17 +153,11 @@
     <div class="row">
       <div class="field">
         <label>Nivel inicio</label>
-        <select id="nivelInicio">
-          <option>A</option><option>B</option><option>C</option><option>D</option>
-          <option>E</option><option>F</option><option>G</option>
-        </select>
+        <select id="nivelInicio"></select>
       </div>
       <div class="field">
         <label>Nivel final</label>
-        <select id="nivelFinal">
-          <option>A</option><option>B</option><option>C</option><option>D</option>
-          <option>E</option><option>F</option><option selected>G</option>
-        </select>
+        <select id="nivelFinal"></select>
       </div>
       <div class="field" style="flex:2;min-width:180px;">
         <label>Pallets a procesar</label>
@@ -411,6 +405,30 @@ function poblarTipos(){
   if (tipos.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
+/**
+ * Nivel Inicio/Final cambian según el Tipo de Rack elegido:
+ *  - TIPO = DOBLE -> A1,A2,B1,B2...G1,G2 (incluye Frente/Fondo).
+ *  - Cualquier otro caso (Todos, SIMPLE, BAJO, PICKING, PILAR) -> A,B,C...G.
+ */
+function actualizarOpcionesNivel(){
+  const tipo = $('tipoDestino') ? $('tipoDestino').value : '';
+  const esDoble = tipo === 'DOBLE';
+  const inicioSel = $('nivelInicio');
+  const finalSel = $('nivelFinal');
+  const prevInicio = inicioSel.value;
+  const prevFinal = finalSel.value;
+
+  const opciones = esDoble ? NIVELES_DOBLE : LETRAS;
+  inicioSel.innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
+  finalSel.innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
+
+  // intenta preservar la selección previa si sigue existiendo en la nueva lista de opciones
+  inicioSel.value = opciones.includes(prevInicio) ? prevInicio : opciones[0];
+  finalSel.value = opciones.includes(prevFinal) ? prevFinal : opciones[opciones.length - 1];
+}
+$('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
+actualizarOpcionesNivel(); // estado inicial (Todos los tipos -> A..G)
+
 function renderPreview(){
   const body = $('resultBody');
   body.innerHTML = '';
@@ -432,7 +450,7 @@ function renderPreview(){
  */
 function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivelFinal){
   if (!bloqueKey) return null;
-  const candidatos = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloqueKey && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+  const candidatos = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloqueKey && enRango(s.nivel, nivelInicio, nivelFinal));
   const mismoCodigo = candidatos.filter(s => s.codSap && s.codSap === pallet.codSap);
   const etiqueta = bloqueKey.replace('|G', ', Bloque ');
   if (!mismoCodigo.length){
@@ -554,8 +572,28 @@ function nivelProfundidad(nivel){
   const s = String(nivel || '').trim();
   return s.length > 1 ? s.charAt(1) : '1';
 }
+/** Nivel completo (letra + profundidad), ej: "A1", "A2", "G2". */
+function nivelCompleto(nivel){
+  return nivelLetra(nivel) + nivelProfundidad(nivel);
+}
 const LETRAS = ['A','B','C','D','E','F','G'];
-function enRango(letra, inicio, fin){
+// A1,A2,B1,B2,...,G1,G2 (para racks TIPO DOBLE: el rango de Nivel incluye Frente/Fondo)
+const NIVELES_DOBLE = LETRAS.flatMap(l => [l+'1', l+'2']);
+
+/**
+ * ¿El nivel de un slot cae dentro del rango elegido? Detecta automáticamente
+ * si el rango es "simple" (A..G, ej. inicio="A") o "doble" (A1..G2, ej.
+ * inicio="A1") según el formato de inicio/fin, y compara en consecuencia.
+ */
+function enRango(nivelSlot, inicio, fin){
+  const esDoble = /^[A-G][12]$/.test(inicio) || /^[A-G][12]$/.test(fin);
+  if (esDoble){
+    const completo = nivelCompleto(nivelSlot);
+    const i = NIVELES_DOBLE.indexOf(inicio), f = NIVELES_DOBLE.indexOf(fin), l = NIVELES_DOBLE.indexOf(completo);
+    if (i === -1 || f === -1 || l === -1) return true;
+    return l >= Math.min(i,f) && l <= Math.max(i,f);
+  }
+  const letra = nivelLetra(nivelSlot);
   const i = LETRAS.indexOf(inicio), f = LETRAS.indexOf(fin), l = LETRAS.indexOf(letra);
   if (i === -1 || f === -1 || l === -1) return true;
   return l >= Math.min(i,f) && l <= Math.max(i,f);
@@ -677,7 +715,7 @@ function calcular(){
  */
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
   const candidatosDe = (bloque) => {
-    let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal));
+    let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
     if (tipoDestino) c = c.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
     return c;
   };
@@ -697,8 +735,8 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
         .map(s => `${s.rack}|${s.ubic}`)
     );
     for (const posKey of columnasConMismoCodigo){
-      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(nivelLetra(s.nivel), nivelInicio, nivelFinal) && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
-      columna.sort((a,b) => LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel)));
+      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
+      columna.sort((a,b) => NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel)));
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
@@ -711,7 +749,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     // (ya sabemos que este bloque tiene el producto — se prioriza sobre saltar a otro bloque)
     const libresEnBloqueConMatch = candidatosBloque
       .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel))));
     for (const slot of libresEnBloqueConMatch){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
@@ -740,7 +778,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     // Cualquier ubicación libre y compatible dentro del bloque
     const libres = candidatosBloque
       .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (LETRAS.indexOf(nivelLetra(a.nivel)) - LETRAS.indexOf(nivelLetra(b.nivel))));
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel))));
     for (const slot of libres){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
