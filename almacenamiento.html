@@ -426,7 +426,7 @@ function poblarTipos(){
   const conteo = new Map(); // tipo -> {total, libres}
   sincronizado.forEach(s => {
     const t = String(s.tipo || '').trim().toUpperCase();
-    if (!t) return;
+    if (!t || t === 'PILAR') return; // PILAR nunca se ofrece: nunca se asigna ahí
     if (!conteo.has(t)) conteo.set(t, { total: 0, libres: 0 });
     const entry = conteo.get(t);
     entry.total++;
@@ -740,6 +740,7 @@ function calcular(){
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
   const candidatosDe = (bloque) => {
     let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
+    c = c.filter(s => String(s.tipo).trim().toUpperCase() !== 'PILAR'); // PILAR nunca se considera para asignar
     if (tipoDestino) c = c.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
     return c;
   };
@@ -759,7 +760,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
         .map(s => `${s.rack}|${s.ubic}`)
     );
     for (const posKey of columnasConMismoCodigo){
-      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
+      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && String(s.tipo).trim().toUpperCase() !== 'PILAR' && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
       columna.sort((a,b) => NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel)));
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
