@@ -363,8 +363,24 @@ async function loadData(){
     }
     if (ultimoError) throw ultimoError;
     if (data.error) throw new Error(data.error);
-    sincronizado = data.sincronizado || [];
-    importData = data.importData || [];
+    // El backend manda formato compacto (arrays por índice, no objetos con
+    // nombres repetidos en cada fila) para que la carga de miles de filas
+    // sea más liviana. Se reconstruyen los objetos de trabajo acá mismo,
+    // una sola vez, así el resto del código sigue usando s.rack, s.codSap, etc.
+    if (data.formato === 'compacto_v1'){
+      sincronizado = (data.sincronizado || []).map(r => ({
+        ubicacion: r[0], almacen: r[1], sector: r[2], rack: r[3], ubic: r[4],
+        nivel: r[5], tipo: r[6], codSap: r[7], cant: r[8], lote: r[9], vencimiento: r[10]
+      }));
+      importData = (data.importData || []).map(r => ({
+        row: r[0], nPallet: r[1], hu: r[2], codSap: r[3], codigoBarra: r[4],
+        descripcion: r[5], lote: r[6], vencimiento: r[7], ubicacion: r[8], disponible: r[9]
+      }));
+    } else {
+      // Compatibilidad hacia atrás por si el backend todavía manda objetos
+      sincronizado = data.sincronizado || [];
+      importData = data.importData || [];
+    }
     log(`OK: ${sincronizado.length} ubicaciones en Sincronizado, ${importData.length} pallets en Import.`, 'ok');
     $('calcBtn').disabled = false;
     renderStats();
@@ -560,7 +576,12 @@ function rowFor(p, ubicPropuesta, estado, coincidencia){
     <td>${esc(p.vencimiento)}</td>
     <td>${esc(p.disponible)}</td>
     <td>${esc(p.ubicacion) || '<span style="color:var(--dim)">—</span>'}</td>
-    <td><input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}"></td>
+    <td>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}" style="flex:1; min-width:0;">
+        <button type="button" class="btn-borrar-ubic" data-pallet="${esc(p.nPallet)}" title="Borrar ubicación propuesta" style="flex:0 0 auto; background:transparent; border:none; padding:6px; font-size:16px; line-height:1; cursor:pointer; color:var(--danger);">🗑</button>
+      </div>
+    </td>
     <td><span class="pill ${pillClass}">${estado}</span></td>
     <td>${coincidenciaHtml}</td>
   `;
@@ -570,6 +591,18 @@ function rowFor(p, ubicPropuesta, estado, coincidencia){
 /* ---------------- Filtro por Cód. SAP ---------------- */
 
 $('filtroCodSap').addEventListener('input', aplicarFiltroCodSap);
+
+// Botón de basurero (por fila): borra la ubicación propuesta de ese input.
+// Delegado en resultBody porque las filas se recrean en cada Calcular.
+$('resultBody').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.btn-borrar-ubic');
+  if (!btn) return;
+  const input = document.querySelector(`.ubic-edit[data-pallet="${CSS.escape(btn.dataset.pallet)}"]`);
+  if (input){
+    input.value = '';
+    input.focus();
+  }
+});
 
 function aplicarFiltroCodSap(){
   const q = $('filtroCodSap').value.trim().toUpperCase();
@@ -906,7 +939,7 @@ async function guardar(){
   });
 
   const paraGuardar = asignaciones
-    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || a.ubicacion }))
+    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' }))
     .filter(a => a.ubicacion);
 
   if (!paraGuardar.length){
