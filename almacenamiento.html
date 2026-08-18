@@ -314,6 +314,21 @@ function enRango(nivelSlot, inicio, fin){
   return l >= Math.min(i,f) && l <= Math.max(i,f);
 }
 
+/**
+ * Orden para elegir "la próxima ubicación libre" dentro de una misma letra
+ * de nivel: en racks TIPO DOBLE, el FONDO (profundidad 2) tiene PRIORIDAD
+ * sobre el FRENTE (profundidad 1) cuando ambos están libres — se llena
+ * primero el Fondo. En cualquier otro tipo, orden normal ascendente.
+ */
+function ordenNivelParaAsignar(slot){
+  const base = LETRAS.indexOf(nivelLetra(slot.nivel)) * 10;
+  const prof = nivelProfundidad(slot.nivel);
+  if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
+    return base + (prof === '2' ? 0 : 1); // Fondo (2) antes que Frente (1)
+  }
+  return base + (Number(prof) || 1);
+}
+
 
 /* ---------------- Carga de datos ---------------- */
 
@@ -779,7 +794,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     );
     for (const posKey of columnasConMismoCodigo){
       const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && String(s.tipo).trim().toUpperCase() !== 'PILAR' && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
-      columna.sort((a,b) => NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel)));
+      columna.sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
@@ -792,7 +807,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     // (ya sabemos que este bloque tiene el producto — se prioriza sobre saltar a otro bloque)
     const libresEnBloqueConMatch = candidatosBloque
       .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel))));
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
     for (const slot of libresEnBloqueConMatch){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
@@ -821,7 +836,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     // Cualquier ubicación libre y compatible dentro del bloque
     const libres = candidatosBloque
       .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (NIVELES_DOBLE.indexOf(nivelCompleto(a.nivel)) - NIVELES_DOBLE.indexOf(nivelCompleto(b.nivel))));
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
     for (const slot of libres){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
