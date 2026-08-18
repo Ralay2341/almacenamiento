@@ -215,7 +215,7 @@
         <thead>
           <tr>
             <th>Pallet</th><th>Cod SAP</th><th>Descripción</th><th>Lote</th>
-            <th>Venc.</th><th>Cant.</th><th>Ubic. actual</th><th>Ubic. propuesta</th><th>Estado</th><th>Coincidencia en bloque</th>
+            <th>Venc.</th><th>Cant.</th><th>Ubic. actual</th><th>Ubic. propuesta</th><th>Estado</th><th>Bloque / Coincidencia</th>
           </tr>
         </thead>
         <tbody id="resultBody">
@@ -270,7 +270,6 @@ function log(msg, cls){
   el.prepend(line);
 }
 
-/* ---------------- Formateador de Fechas DD/MM/AA ---------------- */
 function formatearFecha(val) {
   if (!val) return '';
   const d = new Date(val);
@@ -281,7 +280,6 @@ function formatearFecha(val) {
   return `${dia}/${mes}/${anio}`;
 }
 
-/* ---------------- Utilidades de Nivel ---------------- */
 function nivelLetra(nivel){
   return String(nivel || '').trim().charAt(0).toUpperCase();
 }
@@ -317,8 +315,6 @@ function ordenNivelParaAsignar(slot){
   }
   return base + (Number(prof) || 1);
 }
-
-/* ---------------- Carga de datos ---------------- */
 
 $('loadBtn').addEventListener('click', loadData);
 
@@ -406,7 +402,6 @@ function poblarRacks(){
   if (racks.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
-/** Poblar select "Código SAP a asignar" con formato: asignado = X por asignar = Y */
 function poblarCodigos(){
   const sel = $('codigoDestino');
   const valorPrevio = sel.value;
@@ -437,7 +432,6 @@ function poblarCodigos(){
   if (codigos.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
-/** Poblar select "Tipo de Rack" directamente desde Columna K */
 function poblarTipos(){
   const sel = $('tipoDestino');
   const valorPrevio = sel.value;
@@ -525,15 +519,46 @@ function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivel
   return { tipo: 'fecha_distinta', bloqueKey, texto: `Rack ${etiqueta}: mismo código presente con fecha DISTINTA (${fechas.join(', ')}) — atención con FEFO.` };
 }
 
-function rowFor(p, ubicPropuesta, estado, coincidencia){
+function obtenerBloquesDisponibles(slots, nivelInicio, nivelFinal, tipoDestino, rackDestino) {
+  const mapBloques = new Map();
+
+  slots.forEach(s => {
+    if (s.codSap) return; 
+    if (String(s.tipo).trim().toUpperCase() === 'PILAR') return;
+    if (tipoDestino && String(s.tipo).trim().toUpperCase() !== tipoDestino.toUpperCase()) return;
+    if (rackDestino && normRack(s.rack) !== normRack(rackDestino)) return;
+    if (!enRango(s.nivel, nivelInicio, nivelFinal)) return;
+
+    const key = bloqueDe(s.rack, s.ubic);
+    if (!mapBloques.has(key)) {
+      mapBloques.set(key, { key, rack: normRack(s.rack), grupo: grupoUbic(s.ubic), libres: 0 });
+    }
+    mapBloques.get(key).libres++;
+  });
+
+  return [...mapBloques.values()].sort((a, b) => (Number(a.rack) - Number(b.rack)) || (a.grupo - b.grupo));
+}
+
+function rowFor(p, ubicPropuesta, estado, coincidencia, bloquesOpciones = []){
   const tr = document.createElement('tr');
   tr.dataset.codsap = String(p.codSap || '').toUpperCase();
   const pillClass = estado === 'asignado' ? 'ok'
                     : estado === 'ya asignado' ? 'muted'
                     : estado === 'sin ubicación disponible' ? 'danger'
                     : 'warn';
+
   let coincidenciaHtml = '<span style="color:var(--dim)">—</span>';
-  if (coincidencia){
+
+  if ((!ubicPropuesta || estado === 'sin ubicación disponible') && bloquesOpciones.length > 0) {
+    let opts = '<option value="">-- Seleccionar Bloque Alternativo --</option>';
+    bloquesOpciones.forEach(b => {
+      opts += `<option value="${b.key}">Rack ${b.rack} - Bloque ${b.grupo} (${b.libres} libres)</option>`;
+    });
+    coincidenciaHtml = `
+      <select class="select-bloque-alt" data-pallet="${esc(p.nPallet)}" style="background:var(--panel2); border:1px solid var(--border); color:var(--warn); font-size:12px; padding:4px 6px; border-radius:6px; width:100%;">
+        ${opts}
+      </select>`;
+  } else if (coincidencia) {
     const coincClass = coincidencia.tipo === 'fecha_distinta' ? 'danger'
                       : coincidencia.tipo === 'misma_fecha' ? 'ok'
                       : 'muted';
@@ -542,6 +567,7 @@ function rowFor(p, ubicPropuesta, estado, coincidencia){
                       : 'Sin coincidencia';
     coincidenciaHtml = `<span class="pill ${coincClass}" title="${esc(coincidencia.texto)}">${coincTexto}</span>`;
   }
+
   tr.innerHTML = `
     <td>${esc(p.nPallet)}</td>
     <td>${esc(p.codSap)}</td>
@@ -574,6 +600,37 @@ $('resultBody').addEventListener('click', (ev) => {
   }
 });
 
+$('resultBody').addEventListener('change', (ev) => {
+  if (!ev.target.classList.contains('select-bloque-alt')) return;
+
+  const select = ev.target;
+  const bloqueKey = select.value;
+  const nPallet = select.dataset.pallet;
+  if (!bloqueKey) return;
+
+  const nivelInicio = $('nivelInicio').value;
+  const nivelFinal = $('nivelFinal').value;
+  const tipoDestino = $('tipoDestino').value;
+
+  const slotLibre = sincronizado.find(s => 
+    bloqueDe(s.rack, s.ubic) === bloqueKey && 
+    !s.codSap && 
+    String(s.tipo).trim().toUpperCase() !== 'PILAR' &&
+    (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase()) &&
+    enRango(s.nivel, nivelInicio, nivelFinal)
+  );
+
+  if (slotLibre) {
+    const inputUbic = document.querySelector(`.ubic-edit[data-pallet="${CSS.escape(nPallet)}"]`);
+    if (inputUbic) {
+      inputUbic.value = slotLibre.ubicacion;
+      log(`Pallet ${nPallet} → Asignado manualmente a ${slotLibre.ubicacion} (${bloqueKey})`, 'ok');
+    }
+  } else {
+    log(`El bloque seleccionado no tiene posiciones libres en el rango seleccionado.`, 'warn');
+  }
+});
+
 function aplicarFiltroCodSap(){
   const q = $('filtroCodSap').value.trim().toUpperCase();
   const filas = $('resultBody').querySelectorAll('tr[data-codsap]');
@@ -596,10 +653,6 @@ function aplicarFiltroCodSap(){
 function esc(v){
   return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
-
-/* ---------------- Motor de asignación ---------------- */
-
-$('calcBtn').addEventListener('click', calcular);
 
 function grupoUbic(ubic){
   const n = Number(ubic) || 0;
@@ -664,6 +717,7 @@ function calcular(){
   });
 
   const bloques = listarBloques(slots, rackDestino);
+  const bloquesDisponibles = obtenerBloquesDisponibles(slots, nivelInicio, nivelFinal, tipoDestino, rackDestino);
 
   let pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
   if (codigoDestino) pendientes = pendientes.filter(p => String(p.codSap).trim() === codigoDestino);
@@ -688,8 +742,8 @@ function calcular(){
       log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
     } else {
       sinUbicacion++;
-      body.appendChild(rowFor(p, '', 'sin ubicación disponible', null));
-      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN DISPONIBLE`, 'err');
+      body.appendChild(rowFor(p, '', 'sin ubicación disponible', null, bloquesDisponibles));
+      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN EXACTA. Seleccione un bloque alternativo.`, 'warn');
     }
   });
 
@@ -701,7 +755,7 @@ function calcular(){
   $('saveBtn').disabled = asignaciones.length === 0;
   log(`Cálculo terminado: ${asignaciones.length} asignados, ${sinUbicacion} sin ubicación.`, asignaciones.length ? 'ok' : 'err');
   aplicarFiltroCodSap();
-  poblarCodigos(); // Actualiza conteos en selector
+  poblarCodigos();
 }
 
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
@@ -802,8 +856,6 @@ function ocuparSlot(slot, pallet){
   slot.cant = Number(pallet.disponible) || 0;
 }
 
-/* ---------------- Guardado en Sheet ---------------- */
-
 $('saveBtn').addEventListener('click', guardar);
 
 async function guardar(){
@@ -814,9 +866,8 @@ async function guardar(){
     if (val) porPallet.set(inp.dataset.pallet, val);
   });
 
-  const paraGuardar = asignaciones
-    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' }))
-    .filter(a => a.ubicacion);
+  const paraGuardar = Array.from(porPallet.entries())
+    .map(([pallet, ubicacion]) => ({ pallet, ubicacion }));
 
   if (!paraGuardar.length){
     log('No hay asignaciones para guardar.', 'err');
@@ -835,7 +886,7 @@ async function guardar(){
       const res = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      (data.results || []).forEach(r => r.ok ? okCount++ : errCount++);
+      okCount += (data.actualizados || chunk.length);
     }catch(err){
       errCount += chunk.length;
       log('Error guardando lote: ' + err.message, 'err');
