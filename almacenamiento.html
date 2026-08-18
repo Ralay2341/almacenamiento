@@ -146,8 +146,6 @@
 </header>
 
 <main>
-
-
   <div class="card">
     <h2>Parámetros de búsqueda</h2>
     <div class="row">
@@ -189,7 +187,7 @@
         </select>
       </div>
     </div>
-    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR). Se completan al cargar los datos.</small>
+    <small class="note">La búsqueda por bloques agrupa 3 ubicaciones del Rack destino respetando que el mismo código SAP esté en el mismo bloque entre el Nivel Inicio y Final.</small>
   </div>
 
   <div class="card">
@@ -208,7 +206,7 @@
     <div class="row" style="margin-bottom:10px;">
       <div class="field" style="flex:2;min-width:180px;">
         <label>Filtrar por Cód. SAP</label>
-        <input id="filtroCodSap" type="text" placeholder="Ej: 101245 (dejá vacío para ver todos)">
+        <input id="filtroCodSap" type="text" placeholder="Ej: 101245">
       </div>
     </div>
     <div class="tablewrap">
@@ -231,7 +229,6 @@
     <h2>Registro</h2>
     <div id="log">Esperando acción…</div>
   </div>
-
 </main>
 
 <div class="footerbar">
@@ -243,27 +240,13 @@
 </div>
 
 <script>
-/* ============================================================
-   ALM9037 — Sistema de Almacenamiento
-   Lógica de asignación de ubicaciones (heurística, ver notas).
-   ============================================================ */
-
-// URL del Web App de Apps Script (ver Code.gs para desplegar el backend).
-// Va fija acá para no tener que pegarla cada vez que se abre la app.
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyg67Tl2muKyB1jsAc714rf-WsU9AHkgyDFrASVF2vzmSUlgzgGCsDJj0ppm9LG2P6P/exec';
 
-/* Cualquier error de JS que antes quedaba "silencioso" (la pantalla se
-   quedaba en "Esperando acción…" sin explicar por qué) ahora se ve acá. */
-window.addEventListener('error', (ev) => {
-  log('Error de script: ' + (ev.message || ev), 'err');
-});
-window.addEventListener('unhandledrejection', (ev) => {
-  log('Error async: ' + (ev.reason && ev.reason.message ? ev.reason.message : ev.reason), 'err');
-});
+window.addEventListener('error', (ev) => log('Error: ' + (ev.message || ev), 'err'));
 
-let sincronizado = [];   // filas de la hoja "Sincronizado" (E:S)
-let importData = [];     // filas de la hoja "Import" (A:J)
-let asignaciones = [];   // resultado calculado en esta sesión: {pallet, ubicacion, estado, row}
+let sincronizado = [];
+let importData = [];
+let asignaciones = [];
 
 const $ = id => document.getElementById(id);
 
@@ -276,30 +259,13 @@ function log(msg, cls){
   el.prepend(line);
 }
 
-/* ---------------- Utilidades de Nivel (letra + profundidad) ---------------- */
-// Deben ir ANTES de cualquier función que se ejecute al cargar la página
-// (poblarTipos/actualizarOpcionesNivel se llaman de entrada).
+function nivelLetra(nivel){ return String(nivel || '').trim().charAt(0).toUpperCase(); }
+function nivelProfundidad(nivel){ const s = String(nivel || '').trim(); return s.length > 1 ? s.charAt(1) : '1'; }
+function nivelCompleto(nivel){ return nivelLetra(nivel) + nivelProfundidad(nivel); }
 
-function nivelLetra(nivel){
-  return String(nivel || '').trim().charAt(0).toUpperCase();
-}
-function nivelProfundidad(nivel){
-  const s = String(nivel || '').trim();
-  return s.length > 1 ? s.charAt(1) : '1';
-}
-/** Nivel completo (letra + profundidad), ej: "A1", "A2", "G2". */
-function nivelCompleto(nivel){
-  return nivelLetra(nivel) + nivelProfundidad(nivel);
-}
 const LETRAS = ['A','B','C','D','E','F','G'];
-// A1,A2,B1,B2,...,G1,G2 (para racks TIPO DOBLE: el rango de Nivel incluye Frente/Fondo)
 const NIVELES_DOBLE = LETRAS.flatMap(l => [l+'1', l+'2']);
 
-/**
- * ¿El nivel de un slot cae dentro del rango elegido? Detecta automáticamente
- * si el rango es "simple" (A..G, ej. inicio="A") o "doble" (A1..G2, ej.
- * inicio="A1") según el formato de inicio/fin, y compara en consecuencia.
- */
 function enRango(nivelSlot, inicio, fin){
   const esDoble = /^[A-G][12]$/.test(inicio) || /^[A-G][12]$/.test(fin);
   if (esDoble){
@@ -314,59 +280,25 @@ function enRango(nivelSlot, inicio, fin){
   return l >= Math.min(i,f) && l <= Math.max(i,f);
 }
 
-/**
- * Orden para elegir "la próxima ubicación libre" dentro de una misma letra
- * de nivel: en racks TIPO DOBLE, el FONDO (profundidad 2) tiene PRIORIDAD
- * sobre el FRENTE (profundidad 1) cuando ambos están libres — se llena
- * primero el Fondo. En cualquier otro tipo, orden normal ascendente.
- */
 function ordenNivelParaAsignar(slot){
   const base = LETRAS.indexOf(nivelLetra(slot.nivel)) * 10;
   const prof = nivelProfundidad(slot.nivel);
   if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
-    return base + (prof === '2' ? 0 : 1); // Fondo (2) antes que Frente (1)
+    return base + (prof === '2' ? 0 : 1);
   }
   return base + (Number(prof) || 1);
 }
 
-
-/* ---------------- Carga de datos ---------------- */
-
 $('loadBtn').addEventListener('click', loadData);
 
 async function loadData(){
-  if (!SCRIPT_URL || SCRIPT_URL.includes('XXXX')){
-    log('Falta configurar SCRIPT_URL en el código (const SCRIPT_URL al inicio del <script>).', 'err');
-    return;
-  }
   $('loadBtn').disabled = true;
   log('Cargando datos desde Sincronizado e Import…');
-  const MAX_INTENTOS = 3;
   try{
-    let data = null;
-    let ultimoError = null;
-    for (let intento = 1; intento <= MAX_INTENTOS; intento++){
-      try{
-        // cache-buster: evita que el navegador sirva una respuesta vieja cacheada
-        const res = await fetch(`${SCRIPT_URL}?action=data&_=${Date.now()}`);
-        const texto = await res.text();
-        data = JSON.parse(texto); // si Apps Script devolvió HTML (cold start / error), esto tira excepción
-        ultimoError = null;
-        break;
-      }catch(err){
-        ultimoError = err;
-        if (intento < MAX_INTENTOS){
-          log(`Intento ${intento} falló (${err.message}). Reintentando en ${intento}s…`, 'warn');
-          await new Promise(r => setTimeout(r, intento * 1000));
-        }
-      }
-    }
-    if (ultimoError) throw ultimoError;
+    const res = await fetch(`${SCRIPT_URL}?action=data&_=${Date.now()}`);
+    const data = await res.json();
     if (data.error) throw new Error(data.error);
-    // El backend manda formato compacto (arrays por índice, no objetos con
-    // nombres repetidos en cada fila) para que la carga de miles de filas
-    // sea más liviana. Se reconstruyen los objetos de trabajo acá mismo,
-    // una sola vez, así el resto del código sigue usando s.rack, s.codSap, etc.
+
     if (data.formato === 'compacto_v1'){
       sincronizado = (data.sincronizado || []).map(r => ({
         ubicacion: r[0], almacen: r[1], sector: r[2], rack: r[3], ubic: r[4],
@@ -377,11 +309,11 @@ async function loadData(){
         descripcion: r[5], lote: r[6], vencimiento: r[7], ubicacion: r[8], disponible: r[9]
       }));
     } else {
-      // Compatibilidad hacia atrás por si el backend todavía manda objetos
       sincronizado = data.sincronizado || [];
       importData = data.importData || [];
     }
-    log(`OK: ${sincronizado.length} ubicaciones en Sincronizado, ${importData.length} pallets en Import.`, 'ok');
+
+    log(`Cargados: ${sincronizado.length} ubicaciones, ${importData.length} pallets.`, 'ok');
     $('calcBtn').disabled = false;
     renderStats();
     renderPreview();
@@ -390,8 +322,7 @@ async function loadData(){
     poblarTipos();
     actualizarOpcionesNivel();
   }catch(err){
-    log('Error al cargar datos (tras varios intentos): ' + err.message, 'err');
-    log('Si persiste: abrí la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado en "despertar" — probá Cargar datos de nuevo.', 'err');
+    log('Error al cargar datos: ' + err.message, 'err');
   }finally{
     $('loadBtn').disabled = false;
   }
@@ -407,13 +338,17 @@ function renderStats(){
   $('stSin').textContent = 0;
 }
 
-/** Llena el select "Rack destino" con los racks reales encontrados en Sincronizado (01..16). */
+function normRack(rack){
+  const s = String(rack ?? '').trim();
+  if (s === '') return '';
+  const n = Number(s);
+  return !isNaN(n) ? String(n).padStart(2, '0') : s;
+}
+
 function poblarRacks(){
   const sel = $('rackDestino');
   const valorPrevio = sel.value;
-  const racks = [...new Set(sincronizado.map(r => normRack(r.rack)))]
-    .filter(r => r !== '')
-    .sort((a,b) => Number(a) - Number(b));
+  const racks = [...new Set(sincronizado.map(r => normRack(r.rack)))].filter(r => r !== '').sort();
   sel.innerHTML = '<option value="">Automático (busca por bloques, de menor a mayor)</option>';
   racks.forEach(r => {
     const opt = document.createElement('option');
@@ -424,97 +359,51 @@ function poblarRacks(){
   if (racks.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
-/** Llena el select "Código SAP a asignar" con los códigos reales de Import. */
 function poblarCodigos(){
   const sel = $('codigoDestino');
   const valorPrevio = sel.value;
-  const porCodigo = new Map(); // codSap -> { descripcion, total, pendientes }
+  const mapCod = new Map();
   importData.forEach(p => {
     const cod = String(p.codSap || '').trim();
-    if (!cod) return;
-    if (!porCodigo.has(cod)) porCodigo.set(cod, { descripcion: p.descripcion, total: 0, pendientes: 0 });
-    const entry = porCodigo.get(cod);
-    entry.total++;
-    if (!p.ubicacion) entry.pendientes++;
+    if (cod) mapCod.set(cod, (mapCod.get(cod) || 0) + 1);
   });
-  const codigos = [...porCodigo.keys()].sort((a,b) => a.localeCompare(b, 'es', {numeric:true}));
   sel.innerHTML = '<option value="">Todos los pallets pendientes</option>';
-  codigos.forEach(cod => {
-    const info = porCodigo.get(cod);
+  [...mapCod.keys()].sort().forEach(cod => {
     const opt = document.createElement('option');
     opt.value = cod;
-    const desc = info.descripcion ? ` — ${info.descripcion}` : '';
-    opt.textContent = `${cod}${desc} (${info.pendientes} pend. / ${info.total} total)`;
+    opt.textContent = `${cod} (${mapCod.get(cod)} total)`;
     sel.appendChild(opt);
   });
-  if (codigos.includes(valorPrevio)) sel.value = valorPrevio;
+  if (mapCod.has(valorPrevio)) sel.value = valorPrevio;
 }
 
-/** Llena el select "Tipo de Rack" con los tipos reales de Sincronizado (col. K). */
 function poblarTipos(){
   const sel = $('tipoDestino');
   const valorPrevio = sel.value;
-  const conteo = new Map(); // tipo -> {total, libres}
-  sincronizado.forEach(s => {
-    const t = String(s.tipo || '').trim().toUpperCase();
-    if (!t || t === 'PILAR') return; // PILAR nunca se ofrece: nunca se asigna ahí
-    if (!conteo.has(t)) conteo.set(t, { total: 0, libres: 0 });
-    const entry = conteo.get(t);
-    entry.total++;
-    if (!s.codSap) entry.libres++;
-  });
-  const tipos = [...conteo.keys()].sort();
+  const tipos = [...new Set(sincronizado.map(s => String(s.tipo || '').trim().toUpperCase()))].filter(t => t && t !== 'PILAR').sort();
   sel.innerHTML = '<option value="">Todos los tipos</option>';
   tipos.forEach(t => {
-    const info = conteo.get(t);
     const opt = document.createElement('option');
     opt.value = t;
-    opt.textContent = `${t} (${info.libres} libres / ${info.total} total)`;
+    opt.textContent = t;
     sel.appendChild(opt);
   });
   if (tipos.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
-/**
- * Nivel Inicio/Final cambian según corresponda:
- *  - Rack SIMPLE -> A, B, C ... G.
- *  - Rack DOBLE  -> A1, A2, B1, B2 ... G1, G2 (Frente/Fondo por separado).
- * Prioridad para decidir cuál usar:
- *  1. Si hay un "Tipo de Rack" elegido explícitamente (SIMPLE/DOBLE/BAJO/PICKING/PILAR), se usa ese.
- *  2. Si no, pero hay un "Rack destino" elegido, se detecta el tipo real mirando los
- *     datos de Sincronizado para ese Rack (si tiene alguna posición DOBLE, se usa formato Doble).
- *  3. Si ninguno está elegido ("Todos"), formato simple A..G por defecto.
- */
-function esRackConDoble(rack){
-  return sincronizado.some(s => normRack(s.rack) === normRack(rack) && String(s.tipo).trim().toUpperCase() === 'DOBLE');
-}
 function actualizarOpcionesNivel(){
-  const tipo = $('tipoDestino') ? $('tipoDestino').value : '';
-  const rack = $('rackDestino') ? $('rackDestino').value : '';
-  let esDoble;
-  if (tipo){
-    esDoble = tipo === 'DOBLE';
-  } else if (rack){
-    esDoble = esRackConDoble(rack);
-  } else {
-    esDoble = false;
-  }
-  const inicioSel = $('nivelInicio');
-  const finalSel = $('nivelFinal');
-  const prevInicio = inicioSel.value;
-  const prevFinal = finalSel.value;
-
+  const tipo = $('tipoDestino').value;
+  const rack = $('rackDestino').value;
+  const esDoble = tipo === 'DOBLE' || (!tipo && rack && sincronizado.some(s => normRack(s.rack) === normRack(rack) && String(s.tipo).toUpperCase() === 'DOBLE'));
   const opciones = esDoble ? NIVELES_DOBLE : LETRAS;
-  inicioSel.innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
-  finalSel.innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
-
-  // intenta preservar la selección previa si sigue existiendo en la nueva lista de opciones
-  inicioSel.value = opciones.includes(prevInicio) ? prevInicio : opciones[0];
-  finalSel.value = opciones.includes(prevFinal) ? prevFinal : opciones[opciones.length - 1];
+  
+  $('nivelInicio').innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
+  $('nivelFinal').innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
+  $('nivelFinal').value = opciones[opciones.length - 1];
 }
-$('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
-$('rackDestino') && $('rackDestino').addEventListener('change', actualizarOpcionesNivel);
-actualizarOpcionesNivel(); // estado inicial (nada elegido -> A..G)
+
+$('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
+$('rackDestino').addEventListener('change', actualizarOpcionesNivel);
 
 function renderPreview(){
   const body = $('resultBody');
@@ -523,397 +412,162 @@ function renderPreview(){
     body.innerHTML = '<tr><td colspan="10" class="empty">No hay pallets en Import.</td></tr>';
     return;
   }
-  importData.forEach(p => {
-    body.appendChild(rowFor(p, p.ubicacion, p.ubicacion ? 'ya asignado' : 'pendiente'));
-  });
+  importData.forEach(p => body.appendChild(rowFor(p, p.ubicacion, p.ubicacion ? 'ya asignado' : 'pendiente')));
   aplicarFiltroCodSap();
-}
-
-/**
- * Revisa, dentro de un bloque (3 Posiciones de un mismo Rack, con todos
- * sus niveles) y el rango de Nivel Inicial-Final seleccionado, si el mismo
- * Cód. SAP ya existe ahí, y si todas esas ocurrencias comparten la misma
- * Fecha de Vencimiento o no.
- */
-function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivelFinal){
-  if (!bloqueKey) return null;
-  const candidatos = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloqueKey && enRango(s.nivel, nivelInicio, nivelFinal));
-  const mismoCodigo = candidatos.filter(s => s.codSap && s.codSap === pallet.codSap);
-  const etiqueta = bloqueKey.replace('|G', ', Bloque ');
-  if (!mismoCodigo.length){
-    return { tipo: 'ninguna', bloqueKey, texto: `Rack ${etiqueta}: no hay otras unidades de este código en el rango de niveles.` };
-  }
-  const fechas = [...new Set(mismoCodigo.map(s => s.vencimiento || '(sin fecha)'))];
-  const todasIguales = fechas.length === 1 && fechas[0] === (pallet.vencimiento || '(sin fecha)');
-  if (todasIguales){
-    return { tipo: 'misma_fecha', bloqueKey, texto: `Rack ${etiqueta}: mismo código ya presente (${mismoCodigo.length} ubic.), misma fecha de vencimiento (${fechas[0]}).` };
-  }
-  return { tipo: 'fecha_distinta', bloqueKey, texto: `Rack ${etiqueta}: mismo código presente con fecha DISTINTA (${fechas.join(', ')}) — atención con FEFO.` };
 }
 
 function rowFor(p, ubicPropuesta, estado, coincidencia){
   const tr = document.createElement('tr');
   tr.dataset.codsap = String(p.codSap || '').toUpperCase();
-  const pillClass = estado === 'asignado' ? 'ok'
-                    : estado === 'ya asignado' ? 'muted'
-                    : estado === 'sin ubicación disponible' ? 'danger'
-                    : 'warn';
-  let coincidenciaHtml = '<span style="color:var(--dim)">—</span>';
+  const pillClass = estado === 'asignado' ? 'ok' : estado === 'ya asignado' ? 'muted' : estado === 'sin ubicación disponible' ? 'danger' : 'warn';
+  
+  let coincHtml = '<span style="color:var(--dim)">—</span>';
   if (coincidencia){
-    const coincClass = coincidencia.tipo === 'fecha_distinta' ? 'danger'
-                      : coincidencia.tipo === 'misma_fecha' ? 'ok'
-                      : 'muted';
-    const coincTexto = coincidencia.tipo === 'fecha_distinta' ? '⚠ Fecha distinta'
-                      : coincidencia.tipo === 'misma_fecha' ? '✓ Misma fecha'
-                      : 'Sin coincidencia';
-    coincidenciaHtml = `<span class="pill ${coincClass}" title="${esc(coincidencia.texto)}">${coincTexto}</span>`;
+    const cls = coincidencia.tipo === 'misma_fecha' ? 'ok' : coincidencia.tipo === 'fecha_distinta' ? 'danger' : 'muted';
+    coincHtml = `<span class="pill ${cls}">${coincidencia.texto}</span>`;
   }
+
   tr.innerHTML = `
     <td>${esc(p.nPallet)}</td>
     <td>${esc(p.codSap)}</td>
-    <td style="max-width:220px;">${esc(p.descripcion)}</td>
+    <td>${esc(p.descripcion)}</td>
     <td>${esc(p.lote)}</td>
     <td>${esc(p.vencimiento)}</td>
     <td>${esc(p.disponible)}</td>
-    <td>${esc(p.ubicacion) || '<span style="color:var(--dim)">—</span>'}</td>
-    <td>
-      <div style="display:flex; align-items:center; gap:4px;">
-        <input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}" style="flex:1; min-width:0;">
-        <button type="button" class="btn-borrar-ubic" data-pallet="${esc(p.nPallet)}" title="Borrar ubicación propuesta" style="flex:0 0 auto; background:transparent; border:none; padding:6px; font-size:16px; line-height:1; cursor:pointer; color:var(--danger);">🗑</button>
-      </div>
-    </td>
+    <td>${esc(p.ubicacion) || '—'}</td>
+    <td><input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}"></td>
     <td><span class="pill ${pillClass}">${estado}</span></td>
-    <td>${coincidenciaHtml}</td>
+    <td>${coincHtml}</td>
   `;
   return tr;
 }
 
-/* ---------------- Filtro por Cód. SAP ---------------- */
+function esc(v){ return String(v ?? '').replace(/[&<>"']/g, ''); }
 
 $('filtroCodSap').addEventListener('input', aplicarFiltroCodSap);
-
-// Botón de basurero (por fila): borra la ubicación propuesta de ese input.
-// Delegado en resultBody porque las filas se recrean en cada Calcular.
-$('resultBody').addEventListener('click', (ev) => {
-  const btn = ev.target.closest('.btn-borrar-ubic');
-  if (!btn) return;
-  const input = document.querySelector(`.ubic-edit[data-pallet="${CSS.escape(btn.dataset.pallet)}"]`);
-  if (input){
-    input.value = '';
-    input.focus();
-  }
-});
-
 function aplicarFiltroCodSap(){
   const q = $('filtroCodSap').value.trim().toUpperCase();
-  const filas = $('resultBody').querySelectorAll('tr[data-codsap]');
-  let visibles = 0;
-  filas.forEach(tr => {
-    const coincide = !q || tr.dataset.codsap.includes(q);
-    tr.style.display = coincide ? '' : 'none';
-    if (coincide) visibles++;
+  $('resultBody').querySelectorAll('tr[data-codsap]').forEach(tr => {
+    tr.style.display = !q || tr.dataset.codsap.includes(q) ? '' : 'none';
   });
-  const info = $('filtroInfo');
-  if (!filas.length){
-    info.textContent = '';
-  } else if (q){
-    info.textContent = `Mostrando ${visibles} de ${filas.length} filas para "${q}".`;
-  } else {
-    info.textContent = '';
-  }
 }
 
+/* ============================================================
+   LÓGICA DE BÚSQUEDA POR BLOQUES DE 3 UBICACIONES EN RACK DESTINO
+   ============================================================ */
 
-function esc(v){
-  return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-}
-
-/* ---------------- Motor de asignación ---------------- */
+function grupoUbic(ubic){ return Math.floor((parseInt(ubic, 10) - 1) / 3); }
 
 $('calcBtn').addEventListener('click', calcular);
 
-/**
- * Bloque = agrupación de 3 Posiciones (columna I / UBIC) DENTRO de un mismo
- * Rack, con todos sus niveles. Ej: Rack 01, Posiciones 1-2-3 (con A1,A2,
- * B1,B2...G1,G2) = Bloque 1 del Rack 01. Posiciones 4-5-6 = Bloque 2 del
- * mismo Rack, y así sucesivamente — cada Rack (01 a 16) tiene sus propios
- * bloques, empezando de nuevo desde el Bloque 1.
- */
-function grupoUbic(ubic){
-  const n = Number(ubic) || 0;
-  return Math.ceil(n / 3) || 1;
-}
-function bloqueDe(rack, ubic){
-  return `${normRack(rack)}|G${grupoUbic(ubic)}`;
-}
-/** Lista ordenada de bloques (Rack asc, luego Grupo asc) presentes en slots. */
-function listarBloques(slots, rackFiltro){
-  const set = new Map(); // key -> {rack, grupo}
-  slots.forEach(s => {
-    if (rackFiltro && normRack(s.rack) !== normRack(rackFiltro)) return;
-    const key = bloqueDe(s.rack, s.ubic);
-    if (!set.has(key)) set.set(key, { key, rack: normRack(s.rack), grupo: grupoUbic(s.ubic) });
-  });
-  return [...set.values()].sort((a,b) => (Number(a.rack) - Number(b.rack)) || (a.grupo - b.grupo));
-}
-
-
-
-/** Normaliza un número de Rack a 2 dígitos (01..16), tolerando que la
- * hoja lo devuelva como número (5) o como texto con cero adelante ("05"). */
-function normRack(rack){
-  const s = String(rack ?? '').trim();
-  if (s === '') return '';
-  const n = Number(s);
-  if (!isNaN(n)) return String(n).padStart(2, '0');
-  return s;
-}
-
-
-
 function calcular(){
-  if (!sincronizado.length){
-    log('No hay datos de Sincronizado cargados.', 'err');
-    return;
-  }
+  if (!sincronizado.length) return;
+
   const nivelInicio = $('nivelInicio').value;
   const nivelFinal = $('nivelFinal').value;
   const modo = $('modoProceso').value;
-  const rackDestino = $('rackDestino').value; // '' = automático (todos los cuerpos)
-  const codigoDestino = $('codigoDestino').value; // '' = todos los códigos
-  const tipoDestino = $('tipoDestino').value; // '' = todos los tipos de Rack
+  const rackDestino = $('rackDestino').value;
+  const codigoDestino = $('codigoDestino').value;
+  const tipoDestino = $('tipoDestino').value;
 
-  // Copia de trabajo (no mutamos los datos originales cargados del Sheet)
   const slots = sincronizado.map(r => ({...r}));
+  const byNivelPar = new Map();
 
-  // Reservar como "ocupadas" las ubicaciones que YA tienen algo escrito en
-  // Import!H (columna H), aunque Sincronizado todavía no lo refleje como
-  // ocupado (la sincronización física puede ir un paso atrás). Sin esto,
-  // dos pallets distintos podrían terminar asignados a la misma ubicación
-  // — algo especialmente fácil de pasar por alto porque un mismo Cód. SAP
-  // puede estar guardado en varios Racks distintos a la vez.
-  const slotsPorUbicacion = new Map(slots.map(s => [s.ubicacion, s]));
-  importData.forEach(p => {
-    if (!p.ubicacion) return;
-    const slotReservado = slotsPorUbicacion.get(p.ubicacion);
-    if (slotReservado && !slotReservado.codSap){
-      slotReservado.codSap = p.codSap;
-      slotReservado.lote = p.lote;
-      slotReservado.vencimiento = p.vencimiento;
-      slotReservado.cant = Number(p.disponible) || 0;
-    }
-  });
-
-  // Índices auxiliares
-  const byPosBase = new Map();   // rack|ubic -> [slots] (todas las columnas verticales, cualquier nivel)
-  const byNivelPar = new Map();  // rack|ubic|letraNivel -> [slots] (1 o 2: Frente A1 y Fondo A2 del mismo par)
   slots.forEach(s => {
-    const posKey = `${s.rack}|${s.ubic}`;
-    if (!byPosBase.has(posKey)) byPosBase.set(posKey, []);
-    byPosBase.get(posKey).push(s);
-    const parKey = `${s.rack}|${s.ubic}|${nivelLetra(s.nivel)}`;
+    const parKey = `${normRack(s.rack)}|${s.ubic}|${nivelLetra(s.nivel)}`;
     if (!byNivelPar.has(parKey)) byNivelPar.set(parKey, []);
     byNivelPar.get(parKey).push(s);
   });
 
-  // Bloques a revisar, ascendente (Rack asc, luego Grupo de 3 posiciones asc
-  // DENTRO de ese Rack). Si se eligió un Rack destino, la búsqueda queda
-  // acotada a los bloques de ese Rack únicamente (no expande a otros Racks).
-  const bloques = listarBloques(slots, rackDestino);
-
   let pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
   if (codigoDestino) pendientes = pendientes.filter(p => String(p.codSap).trim() === codigoDestino);
-  // Orden por Nº Pallet ascendente
-  pendientes.sort((a,b) => String(a.nPallet).localeCompare(String(b.nPallet), 'es', {numeric:true}));
 
   asignaciones = [];
   const body = $('resultBody');
   body.innerHTML = '';
 
-  if (codigoDestino){
-    log(`Procesando solo Cód. SAP ${codigoDestino} (${pendientes.length} pallet(s) pendiente(s)).`);
-  }
-  if (rackDestino){
-    log(`Búsqueda acotada al Rack ${normRack(rackDestino)} (todos sus bloques internos de a 3 posiciones) — sin expansión a otros Racks.`);
-  }
-  if (tipoDestino){
-    log(`Búsqueda acotada a ubicaciones Tipo ${tipoDestino} (columna K).`);
-  }
-
-  // pallets ya asignados (modo "pendientes") se listan igual, de solo lectura
-  let yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
-  if (codigoDestino) yaAsignados = yaAsignados.filter(p => String(p.codSap).trim() === codigoDestino);
-  yaAsignados.forEach(p => body.appendChild(rowFor(p, p.ubicacion, 'ya asignado')));
-
   let sinUbicacion = 0;
 
   pendientes.forEach(p => {
-    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino);
+    const resultado = buscarUbicacionBloque(p, slots, byNivelPar, rackDestino, nivelInicio, nivelFinal, tipoDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
-      const coincidencia = analizarCoincidenciaBloque(resultado.bloqueKey, p, slots, nivelInicio, nivelFinal);
-      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', coincidencia));
-      log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
-      if (coincidencia && coincidencia.tipo === 'fecha_distinta'){
-        log(`  ⚠ ${coincidencia.texto}`, 'err');
-      }
+      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', { tipo: 'misma_fecha', texto: resultado.motivo }));
+      log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`, 'ok');
     } else {
       sinUbicacion++;
-      // Sin asignación no hay un bloque concreto que informar (la búsqueda
-      // recorrió todos los bloques disponibles sin éxito).
       body.appendChild(rowFor(p, '', 'sin ubicación disponible', null));
-      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN DISPONIBLE`, 'err');
+      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN EN RACK/NIVEL`, 'err');
     }
   });
 
   $('stAsig').textContent = importData.filter(p=>p.ubicacion).length + asignaciones.length;
   $('stPend').textContent = pendientes.length - asignaciones.length;
   $('stSin').textContent = sinUbicacion;
-  $('stLibres').textContent = slots.filter(s => !s.codSap).length;
-
   $('saveBtn').disabled = asignaciones.length === 0;
-  log(`Cálculo terminado: ${asignaciones.length} asignados, ${sinUbicacion} sin ubicación.`, asignaciones.length ? 'ok' : 'err');
-  aplicarFiltroCodSap();
 }
 
-/**
- * Busca la mejor ubicación para un pallet dentro de las reglas:
- *  - Por bloques ascendente (Rack asc, luego grupo de 3 Posiciones asc
- *    DENTRO de ese Rack), tipo árbol (expande al siguiente bloque si no hay).
- *  - Prioriza apilar VERTICALMENTE junto al mismo código SAP (misma columna rack/ubic, distinto nivel).
- *  - Respeta restricción de Dobles: no pueden coexistir código/lote/vencimiento distintos en A1/A2 (o par de nivel).
- *  - Respeta el rango de Nivel Inicio-Final elegido.
- */
-/**
- * Busca la mejor ubicación para un pallet en DOS PASADAS:
- *
- * PASADA 1 — bloques con el MISMO código Y misma fecha de vencimiento ya
- * presentes (en cualquier posición del bloque, tipo DOBLE/SIMPLE/BAJO/
- * PICKING/PILAR), recorridos ascendente (Rack asc, luego grupo de 3
- * Posiciones asc DENTRO del Rack). Dentro de un bloque así:
- *   1a. Apilar verticalmente en la misma columna (Rack+Posición) si hay nivel libre.
- *   1b. Si no, cualquier otra ubicación libre y compatible dentro de ESE MISMO bloque
- *       (se prioriza el bloque que ya tiene el producto antes que saltar a otro).
- *
- * PASADA 2 — si ningún bloque con coincidencia sirvió, se recorre TODO de
- * nuevo ascendente sin exigir coincidencia previa: ubicación PICKING del
- * mismo código, y si no, cualquier ubicación libre y compatible.
- *
- * En todos los casos: se respeta el rango Nivel Inicio-Final, el Tipo de
- * Rack elegido (si hay), y la restricción de pares Doble (Frente/Fondo
- * mismo código+lote+fecha, y cantidad Frente<=Fondo) vía slotUtilizable().
- */
-function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
-  const candidatosDe = (bloque) => {
-    let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
-    c = c.filter(s => String(s.tipo).trim().toUpperCase() !== 'PILAR'); // PILAR nunca se considera para asignar
-    if (tipoDestino) c = c.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
-    return c;
-  };
+function buscarUbicacionBloque(pallet, slots, byNivelPar, rackDestino, nivelInicio, nivelFinal, tipoDestino){
+  // 1. Filtrar ubicaciones del Rack Destino (si está definido) y en Rango de Niveles
+  let candidatas = slots.filter(s => {
+    const rackMatch = !rackDestino || normRack(s.rack) === normRack(rackDestino);
+    const nivelOk = enRango(s.nivel, nivelInicio, nivelFinal);
+    const tipoOk = !tipoDestino || String(s.tipo).toUpperCase() === tipoDestino;
+    const noPilar = String(s.tipo).toUpperCase() !== 'PILAR';
+    return rackMatch && nivelOk && tipoOk && noPilar;
+  });
 
-  // ---------- PASADA 1: bloques que ya tienen el mismo código + misma fecha ----------
+  if (!candidatas.length) return null;
+
+  // 2. Agrupar en bloques de 3 por Rack + Bloque
+  const bloquesMap = new Map();
+  candidatas.forEach(s => {
+    const bNum = grupoUbic(s.ubic);
+    const key = `${normRack(s.rack)}_B${bNum}`;
+    if (!bloquesMap.has(key)) bloquesMap.set(key, []);
+    bloquesMap.get(key).push(s);
+  });
+
+  const bloques = [...bloquesMap.values()];
+
+  // PASADA 1: Bloques que ya tienen el mismo Cód. SAP
   for (const bloque of bloques){
-    const candidatosBloque = candidatosDe(bloque);
-    if (!candidatosBloque.length) continue;
-
-    const hayCoincidencia = candidatosBloque.some(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento);
-    if (!hayCoincidencia) continue; // este bloque no tiene el producto: se revisa recién en la Pasada 2
-
-    // 1a. Apilar verticalmente en la misma columna del match
-    const columnasConMismoCodigo = new Set(
-      candidatosBloque
-        .filter(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento)
-        .map(s => `${s.rack}|${s.ubic}`)
-    );
-    for (const posKey of columnasConMismoCodigo){
-      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && String(s.tipo).trim().toUpperCase() !== 'PILAR' && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino));
-      columna.sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
-      for (const slot of columna){
+    const codigosEnBloque = bloque.map(s => s.codSap).filter(Boolean);
+    if (codigosEnBloque.includes(pallet.codSap)){
+      const libres = bloque.filter(s => !s.codSap).sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+      for (const slot of libres){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
-          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código y misma fecha', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
+          return { ubicacion: slot.ubicacion, motivo: `Bloque con Cód. ${pallet.codSap}` };
         }
       }
     }
-
-    // 1b. Cualquier otra ubicación libre y compatible dentro del MISMO bloque
-    // (ya sabemos que este bloque tiene el producto — se prioriza sobre saltar a otro bloque)
-    const libresEnBloqueConMatch = candidatosBloque
-      .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
-    for (const slot of libresEnBloqueConMatch){
-      if (slotUtilizable(slot, pallet, byNivelPar)){
-        ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, mismo código y fecha en el bloque`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
-      }
-    }
-    // este bloque tenía el producto pero no logró ubicar (dobles incompatibles, etc.) -> sigue al próximo bloque con match
   }
 
-  // ---------- PASADA 2: fallback ascendente, sin exigir coincidencia previa ----------
+  // PASADA 2: Bloques completamente vacíos
   for (const bloque of bloques){
-    const candidatosBloque = candidatosDe(bloque);
-    if (!candidatosBloque.length) continue;
-
-    // Ubicación tipo PICKING libre del mismo código
-    const picking = candidatosBloque
-      .filter(s => s.tipo === 'PICKING' && s.codSap === pallet.codSap)
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)));
-    for (const slot of picking){
-      if (slotUtilizable(slot, pallet, byNivelPar)){
-        ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
+    const codigosEnBloque = bloque.map(s => s.codSap).filter(Boolean);
+    if (codigosEnBloque.length === 0){
+      const libres = bloque.filter(s => !s.codSap).sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+      for (const slot of libres){
+        if (slotUtilizable(slot, pallet, byNivelPar)){
+          ocuparSlot(slot, pallet);
+          return { ubicacion: slot.ubicacion, motivo: 'Bloque Vacío' };
+        }
       }
     }
-
-    // Cualquier ubicación libre y compatible dentro del bloque
-    const libres = candidatosBloque
-      .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
-    for (const slot of libres){
-      if (slotUtilizable(slot, pallet, byNivelPar)){
-        ocuparSlot(slot, pallet);
-        return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, primera disponible`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
-      }
-    }
-    // nada en este bloque -> el for sigue al próximo bloque (búsqueda tipo árbol)
   }
+
   return null;
 }
 
-/**
- * Un slot es utilizable si está vacío y, si tiene "par" (Frente/Fondo del
- * mismo Rack+Ubic+Nivel, ej. A1/A2), el par cumple las restricciones:
- *  - Si el par está vacío -> se puede asignar sin problema.
- *  - Si el par está ocupado -> SOLO se puede asignar si es exactamente el
- *    mismo Cód. SAP + Fecha de Vencimiento (no se mezclan productos
- *    distintos en el mismo par, en ninguna de las dos direcciones:
- *    A1 vacío/A2 ocupado, o A2 vacío/A1 ocupado). El Lote NO se exige.
- *  - Además, en racks TIPO DOBLE: el Frente (profundidad 1) debe llevar
- *    cantidad MENOR O IGUAL que el Fondo (profundidad 2). Si el Fondo ya
- *    está ocupado y se va a llenar el Frente, la cantidad del pallet debe
- *    ser <= la cantidad del Fondo. Si el Frente ya está ocupado y se va a
- *    llenar el Fondo, la cantidad del pallet debe ser >= la del Frente.
- */
 function slotUtilizable(slot, pallet, byNivelPar){
-  if (slot.codSap) return false; // ya ocupado
-  const parKey = `${slot.rack}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
+  if (slot.codSap) return false;
+  const parKey = `${normRack(slot.rack)}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
   const par = (byNivelPar.get(parKey) || []).filter(s => s !== slot);
-  if (!par.length) return true; // Simple/Bajo/Pilar/Picking sin par
+  
   for (const otro of par){
-    if (!otro.codSap) continue; // el par está vacío, no hay conflicto
-    const mismoProducto = otro.codSap === pallet.codSap && otro.vencimiento === pallet.vencimiento;
-    if (!mismoProducto) return false; // restricción: no pueden coexistir código/vencimiento distintos
-
-    // Regla de cantidad Frente <= Fondo, solo aplica a TIPO DOBLE
-    if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
-      const profSlot = nivelProfundidad(slot.nivel);
-      const profOtro = nivelProfundidad(otro.nivel);
-      const cantPallet = Number(pallet.disponible) || 0;
-      const cantOtro = Number(otro.cant) || 0;
-      if (profSlot === '1' && profOtro === '2' && cantPallet > cantOtro) return false; // Frente debe ser <= Fondo
-      if (profSlot === '2' && profOtro === '1' && cantPallet < cantOtro) return false; // Fondo debe ser >= Frente
-    }
+    if (otro.codSap && otro.codSap !== pallet.codSap) return false;
   }
   return true;
 }
@@ -925,55 +579,29 @@ function ocuparSlot(slot, pallet){
   slot.cant = Number(pallet.disponible) || 0;
 }
 
-/* ---------------- Guardado en Sheet ---------------- */
-
 $('saveBtn').addEventListener('click', guardar);
 
 async function guardar(){
-  // tomar los valores actuales de los inputs editables (por si el usuario corrigió algo)
   const inputs = document.querySelectorAll('.ubic-edit');
   const porPallet = new Map();
-  inputs.forEach(inp => {
-    const val = inp.value.trim();
-    if (val) porPallet.set(inp.dataset.pallet, val);
-  });
+  inputs.forEach(inp => { if (inp.value.trim()) porPallet.set(inp.dataset.pallet, inp.value.trim()); });
 
-  const paraGuardar = asignaciones
-    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' }))
-    .filter(a => a.ubicacion);
-
-  if (!paraGuardar.length){
-    log('No hay asignaciones para guardar.', 'err');
-    return;
-  }
-  if (!SCRIPT_URL){
-    log('Falta configurar la URL del Apps Script.', 'err');
-    return;
-  }
+  const paraGuardar = asignaciones.map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' })).filter(a => a.ubicacion);
+  if (!paraGuardar.length) return;
 
   $('saveBtn').disabled = true;
-  log(`Guardando ${paraGuardar.length} ubicaciones en Import!H…`);
+  log(`Guardando ${paraGuardar.length} ubicaciones en Import…`);
 
-  // Enviar en lotes para no exceder el largo de la URL (GET-only)
-  const LOTE = 25;
-  let okCount = 0, errCount = 0;
-  for (let i = 0; i < paraGuardar.length; i += LOTE){
-    const chunk = paraGuardar.slice(i, i + LOTE);
-    try{
-      const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(chunk))}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      (data.results || []).forEach(r => r.ok ? okCount++ : errCount++);
-    }catch(err){
-      errCount += chunk.length;
-      log('Error guardando lote: ' + err.message, 'err');
-    }
-  }
-
-  log(`Guardado terminado: ${okCount} OK, ${errCount} con error.`, errCount ? 'err' : 'ok');
-  if (okCount) {
-    log('Recargá los datos para ver Import actualizado.', 'ok');
+  try{
+    const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(paraGuardar))}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    log('Guardado correctamente en la hoja Import.', 'ok');
+  }catch(err){
+    log('Error guardando: ' + err.message, 'err');
+  }finally{
+    $('saveBtn').disabled = false;
   }
 }
 </script>
