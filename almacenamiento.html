@@ -179,13 +179,13 @@
     </div>
     <div class="row" style="margin-top:10px;">
       <div class="field" style="flex:2;min-width:200px;">
-        <label>Tipo de Rack (columna G)</label>
+        <label>Tipo de Rack (Columna K)</label>
         <select id="tipoDestino">
           <option value="">Todos los tipos</option>
         </select>
       </div>
     </div>
-    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack. Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR).</small>
+    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack. Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE, DOBLE, BAJO, PICKING).</small>
   </div>
 
   <div class="card">
@@ -353,7 +353,7 @@ async function loadData(){
       rack: normRack(r[3]),
       ubic: String(r[4] || '').trim(),
       nivel: String(r[5] || '').trim(),
-      tipo: String(r[6] || '').trim().toUpperCase(),
+      tipo: String(r[6] || '').trim().toUpperCase(), // Columna K
       codSap: String(r[7] || '').trim(),
       cant: Number(r[8]) || 0,
       lote: String(r[9] || '').trim(),
@@ -451,7 +451,7 @@ function poblarTipos(){
 
   sincronizado.forEach(s => {
     const t = String(s.tipo || '').trim().toUpperCase();
-    if (!t || t === 'PILAR') return;
+    if (!t) return;
     if (!conteo.has(t)) conteo.set(t, { total: 0, libres: 0 });
     const entry = conteo.get(t);
     entry.total++;
@@ -535,7 +535,6 @@ function obtenerBloquesDisponibles(slots, nivelInicio, nivelFinal, tipoDestino, 
 
   slots.forEach(s => {
     if (!slotLibre(s)) return; 
-    if (String(s.tipo).trim().toUpperCase() === 'PILAR') return;
     if (tipoDestino && String(s.tipo).trim().toUpperCase() !== tipoDestino.toUpperCase()) return;
     if (rackDestino && normRack(s.rack) !== normRack(rackDestino)) return;
     if (!enRango(s.nivel, nivelInicio, nivelFinal)) return;
@@ -626,7 +625,6 @@ $('resultBody').addEventListener('change', (ev) => {
   const slotLibreObj = sincronizado.find(s => 
     bloqueDe(s.rack, s.ubic) === bloqueKey && 
     slotLibre(s) && 
-    String(s.tipo).trim().toUpperCase() !== 'PILAR' &&
     (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase()) &&
     enRango(s.nivel, nivelInicio, nivelFinal)
   );
@@ -772,12 +770,11 @@ function calcular(){
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
   const candidatosDe = (bloque) => {
     let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
-    c = c.filter(s => String(s.tipo).trim().toUpperCase() !== 'PILAR');
     if (tipoDestino) c = c.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase());
     return c;
   };
 
-  // 1. Prioridad: Bloques que ya tienen el mismo Cód. SAP y la MISMA fecha de vencimiento
+  // 1. Prioridad: Bloques con mismo Cód. SAP y MISMA fecha
   for (const bloque of bloques){
     const candidatosBloque = candidatosDe(bloque);
     if (!candidatosBloque.length) continue;
@@ -791,7 +788,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
         .map(s => `${s.rack}|${s.ubic}`)
     );
     for (const posKey of columnasConMismoCodigo){
-      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && String(s.tipo).trim().toUpperCase() !== 'PILAR' && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase()));
+      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase()));
       columna.sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
       for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
