@@ -146,6 +146,7 @@
 </header>
 
 <main>
+
   <div class="card">
     <h2>Parámetros de búsqueda</h2>
     <div class="row">
@@ -187,7 +188,7 @@
         </select>
       </div>
     </div>
-    <small class="note">La búsqueda por bloques agrupa 3 ubicaciones del Rack destino respetando que el mismo código SAP esté en el mismo bloque entre el Nivel Inicio y Final.</small>
+    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack. Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR).</small>
   </div>
 
   <div class="card">
@@ -206,7 +207,7 @@
     <div class="row" style="margin-bottom:10px;">
       <div class="field" style="flex:2;min-width:180px;">
         <label>Filtrar por Cód. SAP</label>
-        <input id="filtroCodSap" type="text" placeholder="Ej: 101245">
+        <input id="filtroCodSap" type="text" placeholder="Ej: 101245 (dejá vacío para ver todos)">
       </div>
     </div>
     <div class="tablewrap">
@@ -222,12 +223,14 @@
         </tbody>
       </table>
     </div>
+    <small class="note" id="filtroInfo"></small>
   </div>
 
   <div class="card">
     <h2>Registro</h2>
     <div id="log">Esperando acción…</div>
   </div>
+
 </main>
 
 <div class="footerbar">
@@ -239,12 +242,22 @@
 </div>
 
 <script>
-// Pega aquí la URL de tu implementación ejecutable (.exec)
+/* ============================================================
+   ALM9037 — Sistema de Almacenamiento
+   ============================================================ */
+
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyg67Tl2muKyB1jsAc714rf-WsU9AHkgyDFrASVF2vzmSUlgzgGCsDJj0ppm9LG2P6P/exec';
 
-let sincronizado = [];
-let importData = [];
-let asignaciones = [];
+window.addEventListener('error', (ev) => {
+  log('Error de script: ' + (ev.message || ev), 'err');
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  log('Error async: ' + (ev.reason && ev.reason.message ? ev.reason.message : ev.reason), 'err');
+});
+
+let sincronizado = [];   
+let importData = [];     
+let asignaciones = [];   
 
 const $ = id => document.getElementById(id);
 
@@ -257,31 +270,28 @@ function log(msg, cls){
   el.prepend(line);
 }
 
-// Función auxiliar para peticiones JSONP y saltar bloqueo de CORS desde GitHub Pages
-function fetchJSONP(url) {
-  return new Promise((resolve, reject) => {
-    const callbackName = 'jsonp_cb_' + Math.round(100000 * Math.random());
-    window[callbackName] = function(data) {
-      delete window[callbackName];
-      document.body.removeChild(script);
-      resolve(data);
-    };
-
-    const script = document.createElement('script');
-    script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + callbackName;
-    script.onerror = function() {
-      delete window[callbackName];
-      document.body.removeChild(script);
-      reject(new Error('Error de conexión/CORS con Apps Script'));
-    };
-    document.body.appendChild(script);
-  });
+/* ---------------- Formateador de Fechas DD/MM/AA ---------------- */
+function formatearFecha(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val).trim();
+  const dia = ('0' + d.getDate()).slice(-2);
+  const mes = ('0' + (d.getMonth() + 1)).slice(-2);
+  const anio = String(d.getFullYear()).slice(-2);
+  return `${dia}/${mes}/${anio}`;
 }
 
-function nivelLetra(nivel){ return String(nivel || '').trim().charAt(0).toUpperCase(); }
-function nivelProfundidad(nivel){ const s = String(nivel || '').trim(); return s.length > 1 ? s.charAt(1) : '1'; }
-function nivelCompleto(nivel){ return nivelLetra(nivel) + nivelProfundidad(nivel); }
-
+/* ---------------- Utilidades de Nivel ---------------- */
+function nivelLetra(nivel){
+  return String(nivel || '').trim().charAt(0).toUpperCase();
+}
+function nivelProfundidad(nivel){
+  const s = String(nivel || '').trim();
+  return s.length > 1 ? s.charAt(1) : '1';
+}
+function nivelCompleto(nivel){
+  return nivelLetra(nivel) + nivelProfundidad(nivel);
+}
 const LETRAS = ['A','B','C','D','E','F','G'];
 const NIVELES_DOBLE = LETRAS.flatMap(l => [l+'1', l+'2']);
 
@@ -303,36 +313,59 @@ function ordenNivelParaAsignar(slot){
   const base = LETRAS.indexOf(nivelLetra(slot.nivel)) * 10;
   const prof = nivelProfundidad(slot.nivel);
   if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
-    return base + (prof === '2' ? 0 : 1);
+    return base + (prof === '2' ? 0 : 1); 
   }
   return base + (Number(prof) || 1);
 }
 
+/* ---------------- Carga de datos ---------------- */
+
 $('loadBtn').addEventListener('click', loadData);
 
 async function loadData(){
+  if (!SCRIPT_URL || SCRIPT_URL.includes('XXXX')){
+    log('Falta configurar SCRIPT_URL en el código.', 'err');
+    return;
+  }
   $('loadBtn').disabled = true;
   log('Cargando datos desde Sincronizado e Import…');
+  const MAX_INTENTOS = 3;
   try{
-    const url = `${SCRIPT_URL}?action=data&_=${Date.now()}`;
-    const data = await fetchJSONP(url);
+    let data = null;
+    let ultimoError = null;
+    for (let intento = 1; intento <= MAX_INTENTOS; intento++){
+      try{
+        const res = await fetch(`${SCRIPT_URL}?action=data&_=${Date.now()}`);
+        const texto = await res.text();
+        data = JSON.parse(texto);
+        ultimoError = null;
+        break;
+      }catch(err){
+        ultimoError = err;
+        if (intento < MAX_INTENTOS){
+          log(`Intento ${intento} falló (${err.message}). Reintentando…`, 'warn');
+          await new Promise(r => setTimeout(r, intento * 1000));
+        }
+      }
+    }
+    if (ultimoError) throw ultimoError;
     if (data.error) throw new Error(data.error);
 
     if (data.formato === 'compacto_v1'){
       sincronizado = (data.sincronizado || []).map(r => ({
         ubicacion: r[0], almacen: r[1], sector: r[2], rack: r[3], ubic: r[4],
-        nivel: r[5], tipo: r[6], codSap: r[7], cant: r[8], lote: r[9], vencimiento: r[10]
+        nivel: r[5], tipo: String(r[6] || '').trim(), codSap: r[7], cant: r[8], lote: r[9], vencimiento: formatearFecha(r[10])
       }));
       importData = (data.importData || []).map(r => ({
         row: r[0], nPallet: r[1], hu: r[2], codSap: r[3], codigoBarra: r[4],
-        descripcion: r[5], lote: r[6], vencimiento: r[7], ubicacion: r[8], disponible: r[9]
+        descripcion: r[5], lote: r[6], vencimiento: formatearFecha(r[7]), ubicacion: r[8], disponible: r[9]
       }));
     } else {
-      sincronizado = data.sincronizado || [];
-      importData = data.importData || [];
+      sincronizado = (data.sincronizado || []).map(s => ({...s, vencimiento: formatearFecha(s.vencimiento)}));
+      importData = (data.importData || []).map(p => ({...p, vencimiento: formatearFecha(p.vencimiento)}));
     }
 
-    log(`Cargados: ${sincronizado.length} ubicaciones, ${importData.length} pallets.`, 'ok');
+    log(`OK: ${sincronizado.length} ubicaciones en Sincronizado, ${importData.length} pallets en Import.`, 'ok');
     $('calcBtn').disabled = false;
     renderStats();
     renderPreview();
@@ -340,9 +373,9 @@ async function loadData(){
     poblarCodigos();
     poblarTipos();
     actualizarOpcionesNivel();
-  } catch(err){
+  }catch(err){
     log('Error al cargar datos: ' + err.message, 'err');
-  } finally {
+  }finally{
     $('loadBtn').disabled = false;
   }
 }
@@ -357,17 +390,12 @@ function renderStats(){
   $('stSin').textContent = 0;
 }
 
-function normRack(rack){
-  const s = String(rack ?? '').trim();
-  if (s === '') return '';
-  const n = Number(s);
-  return !isNaN(n) ? String(n).padStart(2, '0') : s;
-}
-
 function poblarRacks(){
   const sel = $('rackDestino');
   const valorPrevio = sel.value;
-  const racks = [...new Set(sincronizado.map(r => normRack(r.rack)))].filter(r => r !== '').sort();
+  const racks = [...new Set(sincronizado.map(r => normRack(r.rack)))]
+    .filter(r => r !== '')
+    .sort((a,b) => Number(a) - Number(b));
   sel.innerHTML = '<option value="">Automático (busca por bloques, de menor a mayor)</option>';
   racks.forEach(r => {
     const opt = document.createElement('option');
@@ -378,51 +406,95 @@ function poblarRacks(){
   if (racks.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
+/** Poblar select "Código SAP a asignar" con formato: asignado = X por asignar = Y */
 function poblarCodigos(){
   const sel = $('codigoDestino');
   const valorPrevio = sel.value;
-  const mapCod = new Map();
+  const porCodigo = new Map();
+
   importData.forEach(p => {
     const cod = String(p.codSap || '').trim();
-    if (cod) mapCod.set(cod, (mapCod.get(cod) || 0) + 1);
+    if (!cod) return;
+    if (!porCodigo.has(cod)) porCodigo.set(cod, { descripcion: p.descripcion, asignados: 0, porAsignar: 0 });
+    const entry = porCodigo.get(cod);
+    if (p.ubicacion && String(p.ubicacion).trim() !== '') {
+      entry.asignados++;
+    } else {
+      entry.porAsignar++;
+    }
   });
+
+  const codigos = [...porCodigo.keys()].sort((a,b) => a.localeCompare(b, 'es', {numeric:true}));
   sel.innerHTML = '<option value="">Todos los pallets pendientes</option>';
-  [...mapCod.keys()].sort().forEach(cod => {
+  codigos.forEach(cod => {
+    const info = porCodigo.get(cod);
     const opt = document.createElement('option');
     opt.value = cod;
-    opt.textContent = `${cod} (${mapCod.get(cod)} total)`;
+    const desc = info.descripcion ? ` — ${info.descripcion}` : '';
+    opt.textContent = `${cod}${desc} (asignado = ${info.asignados} por asignar = ${info.porAsignar})`;
     sel.appendChild(opt);
   });
-  if (mapCod.has(valorPrevio)) sel.value = valorPrevio;
+  if (codigos.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
+/** Poblar select "Tipo de Rack" directamente desde Columna K */
 function poblarTipos(){
   const sel = $('tipoDestino');
   const valorPrevio = sel.value;
-  const tipos = [...new Set(sincronizado.map(s => String(s.tipo || '').trim().toUpperCase()))].filter(t => t && t !== 'PILAR').sort();
+  const conteo = new Map(); 
+
+  sincronizado.forEach(s => {
+    const t = String(s.tipo || '').trim().toUpperCase();
+    if (!t || t === 'PILAR') return;
+    if (!conteo.has(t)) conteo.set(t, { total: 0, libres: 0 });
+    const entry = conteo.get(t);
+    entry.total++;
+    if (!s.codSap) entry.libres++;
+  });
+
+  const tipos = [...conteo.keys()].sort();
   sel.innerHTML = '<option value="">Todos los tipos</option>';
   tipos.forEach(t => {
+    const info = conteo.get(t);
     const opt = document.createElement('option');
     opt.value = t;
-    opt.textContent = t;
+    opt.textContent = `${t} (${info.libres} libres / ${info.total} total)`;
     sel.appendChild(opt);
   });
   if (tipos.includes(valorPrevio)) sel.value = valorPrevio;
 }
 
-function actualizarOpcionesNivel(){
-  const tipo = $('tipoDestino').value;
-  const rack = $('rackDestino').value;
-  const esDoble = tipo === 'DOBLE' || (!tipo && rack && sincronizado.some(s => normRack(s.rack) === normRack(rack) && String(s.tipo).toUpperCase() === 'DOBLE'));
-  const opciones = esDoble ? NIVELES_DOBLE : LETRAS;
-  
-  $('nivelInicio').innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
-  $('nivelFinal').innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
-  $('nivelFinal').value = opciones[opciones.length - 1];
+function esRackConDoble(rack){
+  return sincronizado.some(s => normRack(s.rack) === normRack(rack) && String(s.tipo).trim().toUpperCase() === 'DOBLE');
 }
 
-$('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
-$('rackDestino').addEventListener('change', actualizarOpcionesNivel);
+function actualizarOpcionesNivel(){
+  const tipo = $('tipoDestino') ? $('tipoDestino').value : '';
+  const rack = $('rackDestino') ? $('rackDestino').value : '';
+  let esDoble;
+  if (tipo){
+    esDoble = tipo === 'DOBLE';
+  } else if (rack){
+    esDoble = esRackConDoble(rack);
+  } else {
+    esDoble = false;
+  }
+  const inicioSel = $('nivelInicio');
+  const finalSel = $('nivelFinal');
+  const prevInicio = inicioSel.value;
+  const prevFinal = finalSel.value;
+
+  const opciones = esDoble ? NIVELES_DOBLE : LETRAS;
+  inicioSel.innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
+  finalSel.innerHTML = opciones.map(o => `<option>${o}</option>`).join('');
+
+  inicioSel.value = opciones.includes(prevInicio) ? prevInicio : opciones[0];
+  finalSel.value = opciones.includes(prevFinal) ? prevFinal : opciones[opciones.length - 1];
+}
+
+$('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
+$('rackDestino') && $('rackDestino').addEventListener('change', actualizarOpcionesNivel);
+actualizarOpcionesNivel();
 
 function renderPreview(){
   const body = $('resultBody');
@@ -431,53 +503,134 @@ function renderPreview(){
     body.innerHTML = '<tr><td colspan="10" class="empty">No hay pallets en Import.</td></tr>';
     return;
   }
-  importData.forEach(p => body.appendChild(rowFor(p, p.ubicacion, p.ubicacion ? 'ya asignado' : 'pendiente')));
+  importData.forEach(p => {
+    body.appendChild(rowFor(p, p.ubicacion, p.ubicacion ? 'ya asignado' : 'pendiente'));
+  });
   aplicarFiltroCodSap();
+}
+
+function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivelFinal){
+  if (!bloqueKey) return null;
+  const candidatos = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloqueKey && enRango(s.nivel, nivelInicio, nivelFinal));
+  const mismoCodigo = candidatos.filter(s => s.codSap && s.codSap === pallet.codSap);
+  const etiqueta = bloqueKey.replace('|G', ', Bloque ');
+  if (!mismoCodigo.length){
+    return { tipo: 'ninguna', bloqueKey, texto: `Rack ${etiqueta}: no hay otras unidades de este código en el rango de niveles.` };
+  }
+  const fechas = [...new Set(mismoCodigo.map(s => s.vencimiento || '(sin fecha)'))];
+  const todasIguales = fechas.length === 1 && fechas[0] === (pallet.vencimiento || '(sin fecha)');
+  if (todasIguales){
+    return { tipo: 'misma_fecha', bloqueKey, texto: `Rack ${etiqueta}: mismo código ya presente (${mismoCodigo.length} ubic.), misma fecha de vencimiento (${fechas[0]}).` };
+  }
+  return { tipo: 'fecha_distinta', bloqueKey, texto: `Rack ${etiqueta}: mismo código presente con fecha DISTINTA (${fechas.join(', ')}) — atención con FEFO.` };
 }
 
 function rowFor(p, ubicPropuesta, estado, coincidencia){
   const tr = document.createElement('tr');
   tr.dataset.codsap = String(p.codSap || '').toUpperCase();
-  const pillClass = estado === 'asignado' ? 'ok' : estado === 'ya asignado' ? 'muted' : estado === 'sin ubicación disponible' ? 'danger' : 'warn';
-  
-  let coincHtml = '<span style="color:var(--dim)">—</span>';
+  const pillClass = estado === 'asignado' ? 'ok'
+                    : estado === 'ya asignado' ? 'muted'
+                    : estado === 'sin ubicación disponible' ? 'danger'
+                    : 'warn';
+  let coincidenciaHtml = '<span style="color:var(--dim)">—</span>';
   if (coincidencia){
-    const cls = coincidencia.tipo === 'misma_fecha' ? 'ok' : coincidencia.tipo === 'fecha_distinta' ? 'danger' : 'muted';
-    coincHtml = `<span class="pill ${cls}">${coincidencia.texto}</span>`;
+    const coincClass = coincidencia.tipo === 'fecha_distinta' ? 'danger'
+                      : coincidencia.tipo === 'misma_fecha' ? 'ok'
+                      : 'muted';
+    const coincTexto = coincidencia.tipo === 'fecha_distinta' ? '⚠ Fecha distinta'
+                      : coincidencia.tipo === 'misma_fecha' ? '✓ Misma fecha'
+                      : 'Sin coincidencia';
+    coincidenciaHtml = `<span class="pill ${coincClass}" title="${esc(coincidencia.texto)}">${coincTexto}</span>`;
   }
-
   tr.innerHTML = `
     <td>${esc(p.nPallet)}</td>
     <td>${esc(p.codSap)}</td>
-    <td>${esc(p.descripcion)}</td>
+    <td style="max-width:220px;">${esc(p.descripcion)}</td>
     <td>${esc(p.lote)}</td>
     <td>${esc(p.vencimiento)}</td>
     <td>${esc(p.disponible)}</td>
-    <td>${esc(p.ubicacion) || '—'}</td>
-    <td><input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}"></td>
+    <td>${esc(p.ubicacion) || '<span style="color:var(--dim)">—</span>'}</td>
+    <td>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <input class="ubic-edit" data-pallet="${esc(p.nPallet)}" value="${esc(ubicPropuesta || '')}" style="flex:1; min-width:0;">
+        <button type="button" class="btn-borrar-ubic" data-pallet="${esc(p.nPallet)}" title="Borrar ubicación propuesta" style="flex:0 0 auto; background:transparent; border:none; padding:6px; font-size:16px; line-height:1; cursor:pointer; color:var(--danger);">🗑</button>
+      </div>
+    </td>
     <td><span class="pill ${pillClass}">${estado}</span></td>
-    <td>${coincHtml}</td>
+    <td>${coincidenciaHtml}</td>
   `;
   return tr;
 }
 
-function esc(v){ return String(v ?? '').replace(/[&<>"']/g, ''); }
-
 $('filtroCodSap').addEventListener('input', aplicarFiltroCodSap);
+
+$('resultBody').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.btn-borrar-ubic');
+  if (!btn) return;
+  const input = document.querySelector(`.ubic-edit[data-pallet="${CSS.escape(btn.dataset.pallet)}"]`);
+  if (input){
+    input.value = '';
+    input.focus();
+  }
+});
+
 function aplicarFiltroCodSap(){
   const q = $('filtroCodSap').value.trim().toUpperCase();
-  $('resultBody').querySelectorAll('tr[data-codsap]').forEach(tr => {
-    tr.style.display = !q || tr.dataset.codsap.includes(q) ? '' : 'none';
+  const filas = $('resultBody').querySelectorAll('tr[data-codsap]');
+  let visibles = 0;
+  filas.forEach(tr => {
+    const coincide = !q || tr.dataset.codsap.includes(q);
+    tr.style.display = coincide ? '' : 'none';
+    if (coincide) visibles++;
   });
+  const info = $('filtroInfo');
+  if (!filas.length){
+    info.textContent = '';
+  } else if (q){
+    info.textContent = `Mostrando ${visibles} de ${filas.length} filas para "${q}".`;
+  } else {
+    info.textContent = '';
+  }
 }
 
-function grupoUbic(ubic){ return Math.floor((parseInt(ubic, 10) - 1) / 3); }
+function esc(v){
+  return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+/* ---------------- Motor de asignación ---------------- */
 
 $('calcBtn').addEventListener('click', calcular);
 
-function calcular(){
-  if (!sincronizado.length) return;
+function grupoUbic(ubic){
+  const n = Number(ubic) || 0;
+  return Math.ceil(n / 3) || 1;
+}
+function bloqueDe(rack, ubic){
+  return `${normRack(rack)}|G${grupoUbic(ubic)}`;
+}
+function listarBloques(slots, rackFiltro){
+  const set = new Map(); 
+  slots.forEach(s => {
+    if (rackFiltro && normRack(s.rack) !== normRack(rackFiltro)) return;
+    const key = bloqueDe(s.rack, s.ubic);
+    if (!set.has(key)) set.set(key, { key, rack: normRack(s.rack), grupo: grupoUbic(s.ubic) });
+  });
+  return [...set.values()].sort((a,b) => (Number(a.rack) - Number(b.rack)) || (a.grupo - b.grupo));
+}
 
+function normRack(rack){
+  const s = String(rack ?? '').trim();
+  if (s === '') return '';
+  const n = Number(s);
+  if (!isNaN(n)) return String(n).padStart(2, '0');
+  return s;
+}
+
+function calcular(){
+  if (!sincronizado.length){
+    log('No hay datos de Sincronizado cargados.', 'err');
+    return;
+  }
   const nivelInicio = $('nivelInicio').value;
   const nivelFinal = $('nivelFinal').value;
   const modo = $('modoProceso').value;
@@ -486,100 +639,158 @@ function calcular(){
   const tipoDestino = $('tipoDestino').value;
 
   const slots = sincronizado.map(r => ({...r}));
-  const byNivelPar = new Map();
 
+  const slotsPorUbicacion = new Map(slots.map(s => [s.ubicacion, s]));
+  importData.forEach(p => {
+    if (!p.ubicacion) return;
+    const slotReservado = slotsPorUbicacion.get(p.ubicacion);
+    if (slotReservado && !slotReservado.codSap){
+      slotReservado.codSap = p.codSap;
+      slotReservado.lote = p.lote;
+      slotReservado.vencimiento = p.vencimiento;
+      slotReservado.cant = Number(p.disponible) || 0;
+    }
+  });
+
+  const byPosBase = new Map();
+  const byNivelPar = new Map();
   slots.forEach(s => {
-    const parKey = `${normRack(s.rack)}|${s.ubic}|${nivelLetra(s.nivel)}`;
+    const posKey = `${s.rack}|${s.ubic}`;
+    if (!byPosBase.has(posKey)) byPosBase.set(posKey, []);
+    byPosBase.get(posKey).push(s);
+    const parKey = `${s.rack}|${s.ubic}|${nivelLetra(s.nivel)}`;
     if (!byNivelPar.has(parKey)) byNivelPar.set(parKey, []);
     byNivelPar.get(parKey).push(s);
   });
 
+  const bloques = listarBloques(slots, rackDestino);
+
   let pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
   if (codigoDestino) pendientes = pendientes.filter(p => String(p.codSap).trim() === codigoDestino);
+  pendientes.sort((a,b) => String(a.nPallet).localeCompare(String(b.nPallet), 'es', {numeric:true}));
 
   asignaciones = [];
   const body = $('resultBody');
   body.innerHTML = '';
 
+  let yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
+  if (codigoDestino) yaAsignados = yaAsignados.filter(p => String(p.codSap).trim() === codigoDestino);
+  yaAsignados.forEach(p => body.appendChild(rowFor(p, p.ubicacion, 'ya asignado')));
+
   let sinUbicacion = 0;
 
   pendientes.forEach(p => {
-    const resultado = buscarUbicacionBloque(p, slots, byNivelPar, rackDestino, nivelInicio, nivelFinal, tipoDestino);
+    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
-      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', { tipo: 'misma_fecha', texto: resultado.motivo }));
-      log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`, 'ok');
+      const coincidencia = analizarCoincidenciaBloque(resultado.bloqueKey, p, slots, nivelInicio, nivelFinal);
+      body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', coincidencia));
+      log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
     } else {
       sinUbicacion++;
       body.appendChild(rowFor(p, '', 'sin ubicación disponible', null));
-      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN EN RACK/NIVEL`, 'err');
+      log(`Pallet ${p.nPallet} (${p.codSap}) → SIN UBICACIÓN DISPONIBLE`, 'err');
     }
   });
 
   $('stAsig').textContent = importData.filter(p=>p.ubicacion).length + asignaciones.length;
   $('stPend').textContent = pendientes.length - asignaciones.length;
   $('stSin').textContent = sinUbicacion;
+  $('stLibres').textContent = slots.filter(s => !s.codSap).length;
+
   $('saveBtn').disabled = asignaciones.length === 0;
+  log(`Cálculo terminado: ${asignaciones.length} asignados, ${sinUbicacion} sin ubicación.`, asignaciones.length ? 'ok' : 'err');
+  aplicarFiltroCodSap();
+  poblarCodigos(); // Actualiza conteos en selector
 }
 
-function buscarUbicacionBloque(pallet, slots, byNivelPar, rackDestino, nivelInicio, nivelFinal, tipoDestino){
-  let candidatas = slots.filter(s => {
-    const rackMatch = !rackDestino || normRack(s.rack) === normRack(rackDestino);
-    const nivelOk = enRango(s.nivel, nivelInicio, nivelFinal);
-    const tipoOk = !tipoDestino || String(s.tipo).toUpperCase() === tipoDestino;
-    const noPilar = String(s.tipo).toUpperCase() !== 'PILAR';
-    return rackMatch && nivelOk && tipoOk && noPilar;
-  });
+function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
+  const candidatosDe = (bloque) => {
+    let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
+    c = c.filter(s => String(s.tipo).trim().toUpperCase() !== 'PILAR');
+    if (tipoDestino) c = c.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase());
+    return c;
+  };
 
-  if (!candidatas.length) return null;
-
-  const bloquesMap = new Map();
-  candidatas.forEach(s => {
-    const bNum = grupoUbic(s.ubic);
-    const key = `${normRack(s.rack)}_B${bNum}`;
-    if (!bloquesMap.has(key)) bloquesMap.set(key, []);
-    bloquesMap.get(key).push(s);
-  });
-
-  const bloques = [...bloquesMap.values()];
-
-  // Pasada 1: Bloques que ya poseen el mismo código SAP
   for (const bloque of bloques){
-    const codigosEnBloque = bloque.map(s => s.codSap).filter(Boolean);
-    if (codigosEnBloque.includes(pallet.codSap)){
-      const libres = bloque.filter(s => !s.codSap).sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
-      for (const slot of libres){
+    const candidatosBloque = candidatosDe(bloque);
+    if (!candidatosBloque.length) continue;
+
+    const hayCoincidencia = candidatosBloque.some(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento);
+    if (!hayCoincidencia) continue;
+
+    const columnasConMismoCodigo = new Set(
+      candidatosBloque
+        .filter(s => s.codSap === pallet.codSap && s.vencimiento === pallet.vencimiento)
+        .map(s => `${s.rack}|${s.ubic}`)
+    );
+    for (const posKey of columnasConMismoCodigo){
+      const columna = (byPosBase.get(posKey) || []).filter(s => enRango(s.nivel, nivelInicio, nivelFinal) && String(s.tipo).trim().toUpperCase() !== 'PILAR' && (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino.toUpperCase()));
+      columna.sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+      for (const slot of columna){
         if (slotUtilizable(slot, pallet, byNivelPar)){
           ocuparSlot(slot, pallet);
-          return { ubicacion: slot.ubicacion, motivo: `Bloque con Cód. ${pallet.codSap}` };
+          return { ubicacion: slot.ubicacion, motivo: 'apilado vertical, mismo código y misma fecha', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
         }
+      }
+    }
+
+    const libresEnBloqueConMatch = candidatosBloque
+      .slice()
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
+    for (const slot of libresEnBloqueConMatch){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, mismo código y fecha en el bloque`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
       }
     }
   }
 
-  // Pasada 2: Bloques totalmente vacíos
   for (const bloque of bloques){
-    const codigosEnBloque = bloque.map(s => s.codSap).filter(Boolean);
-    if (codigosEnBloque.length === 0){
-      const libres = bloque.filter(s => !s.codSap).sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
-      for (const slot of libres){
-        if (slotUtilizable(slot, pallet, byNivelPar)){
-          ocuparSlot(slot, pallet);
-          return { ubicacion: slot.ubicacion, motivo: 'Bloque Vacío' };
-        }
+    const candidatosBloque = candidatosDe(bloque);
+    if (!candidatosBloque.length) continue;
+
+    const picking = candidatosBloque
+      .filter(s => String(s.tipo).trim().toUpperCase() === 'PICKING' && s.codSap === pallet.codSap)
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)));
+    for (const slot of picking){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: 'ubicación PICKING', bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
+      }
+    }
+
+    const libres = candidatosBloque
+      .slice()
+      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
+    for (const slot of libres){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: `Rack ${bloque.rack} bloque ${bloque.grupo}, primera disponible`, bloqueKey: bloque.key, rack: slot.rack, ubic: slot.ubic };
       }
     }
   }
-
   return null;
 }
 
 function slotUtilizable(slot, pallet, byNivelPar){
-  if (slot.codSap) return false;
-  const parKey = `${normRack(slot.rack)}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
+  if (slot.codSap) return false; 
+  const parKey = `${slot.rack}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
   const par = (byNivelPar.get(parKey) || []).filter(s => s !== slot);
+  if (!par.length) return true; 
   for (const otro of par){
-    if (otro.codSap && otro.codSap !== pallet.codSap) return false;
+    if (!otro.codSap) continue; 
+    const mismoProducto = otro.codSap === pallet.codSap && otro.vencimiento === pallet.vencimiento;
+    if (!mismoProducto) return false; 
+
+    if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
+      const profSlot = nivelProfundidad(slot.nivel);
+      const profOtro = nivelProfundidad(otro.nivel);
+      const cantPallet = Number(pallet.disponible) || 0;
+      const cantOtro = Number(otro.cant) || 0;
+      if (profSlot === '1' && profOtro === '2' && cantPallet > cantOtro) return false; 
+      if (profSlot === '2' && profOtro === '1' && cantPallet < cantOtro) return false; 
+    }
   }
   return true;
 }
@@ -591,28 +802,49 @@ function ocuparSlot(slot, pallet){
   slot.cant = Number(pallet.disponible) || 0;
 }
 
+/* ---------------- Guardado en Sheet ---------------- */
+
 $('saveBtn').addEventListener('click', guardar);
 
 async function guardar(){
   const inputs = document.querySelectorAll('.ubic-edit');
   const porPallet = new Map();
-  inputs.forEach(inp => { if (inp.value.trim()) porPallet.set(inp.dataset.pallet, inp.value.trim()); });
+  inputs.forEach(inp => {
+    const val = inp.value.trim();
+    if (val) porPallet.set(inp.dataset.pallet, val);
+  });
 
-  const paraGuardar = asignaciones.map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' })).filter(a => a.ubicacion);
-  if (!paraGuardar.length) return;
+  const paraGuardar = asignaciones
+    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' }))
+    .filter(a => a.ubicacion);
+
+  if (!paraGuardar.length){
+    log('No hay asignaciones para guardar.', 'err');
+    return;
+  }
 
   $('saveBtn').disabled = true;
-  log(`Guardando ${paraGuardar.length} ubicaciones en Import…`);
+  log(`Guardando ${paraGuardar.length} ubicaciones en Import!H…`);
 
-  try{
-    const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(paraGuardar))}`;
-    const data = await fetchJSONP(url);
-    if (data.error) throw new Error(data.error);
-    log('Guardado correctamente en la hoja Import.', 'ok');
-  }catch(err){
-    log('Error guardando: ' + err.message, 'err');
-  }finally{
-    $('saveBtn').disabled = false;
+  const LOTE = 25;
+  let okCount = 0, errCount = 0;
+  for (let i = 0; i < paraGuardar.length; i += LOTE){
+    const chunk = paraGuardar.slice(i, i + LOTE);
+    try{
+      const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(chunk))}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      (data.results || []).forEach(r => r.ok ? okCount++ : errCount++);
+    }catch(err){
+      errCount += chunk.length;
+      log('Error guardando lote: ' + err.message, 'err');
+    }
+  }
+
+  log(`Guardado terminado: ${okCount} OK, ${errCount} con error.`, errCount ? 'err' : 'ok');
+  if (okCount) {
+    log('Recargá los datos para ver Import actualizado.', 'ok');
   }
 }
 </script>
