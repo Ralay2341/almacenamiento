@@ -638,6 +638,24 @@ function calcular(){
   // Copia de trabajo (no mutamos los datos originales cargados del Sheet)
   const slots = sincronizado.map(r => ({...r}));
 
+  // Reservar como "ocupadas" las ubicaciones que YA tienen algo escrito en
+  // Import!H (columna H), aunque Sincronizado todavía no lo refleje como
+  // ocupado (la sincronización física puede ir un paso atrás). Sin esto,
+  // dos pallets distintos podrían terminar asignados a la misma ubicación
+  // — algo especialmente fácil de pasar por alto porque un mismo Cód. SAP
+  // puede estar guardado en varios Racks distintos a la vez.
+  const slotsPorUbicacion = new Map(slots.map(s => [s.ubicacion, s]));
+  importData.forEach(p => {
+    if (!p.ubicacion) return;
+    const slotReservado = slotsPorUbicacion.get(p.ubicacion);
+    if (slotReservado && !slotReservado.codSap){
+      slotReservado.codSap = p.codSap;
+      slotReservado.lote = p.lote;
+      slotReservado.vencimiento = p.vencimiento;
+      slotReservado.cant = Number(p.disponible) || 0;
+    }
+  });
+
   // Índices auxiliares
   const byPosBase = new Map();   // rack|ubic -> [slots] (todas las columnas verticales, cualquier nivel)
   const byNivelPar = new Map();  // rack|ubic|letraNivel -> [slots] (1 o 2: Frente A1 y Fondo A2 del mismo par)
