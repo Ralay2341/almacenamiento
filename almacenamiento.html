@@ -222,7 +222,6 @@
         </tbody>
       </table>
     </div>
-    <small class="note" id="filtroInfo"></small>
   </div>
 
   <div class="card">
@@ -240,9 +239,8 @@
 </div>
 
 <script>
+// Pega aquí la URL de tu implementación ejecutable (.exec)
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyg67Tl2muKyB1jsAc714rf-WsU9AHkgyDFrASVF2vzmSUlgzgGCsDJj0ppm9LG2P6P/exec';
-
-window.addEventListener('error', (ev) => log('Error: ' + (ev.message || ev), 'err'));
 
 let sincronizado = [];
 let importData = [];
@@ -257,6 +255,27 @@ function log(msg, cls){
   const t = new Date().toLocaleTimeString('es-CL');
   line.textContent = `[${t}] ${msg}`;
   el.prepend(line);
+}
+
+// Función auxiliar para peticiones JSONP y saltar bloqueo de CORS desde GitHub Pages
+function fetchJSONP(url) {
+  return new Promise((resolve, reject) => {
+    const callbackName = 'jsonp_cb_' + Math.round(100000 * Math.random());
+    window[callbackName] = function(data) {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      resolve(data);
+    };
+
+    const script = document.createElement('script');
+    script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + callbackName;
+    script.onerror = function() {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      reject(new Error('Error de conexión/CORS con Apps Script'));
+    };
+    document.body.appendChild(script);
+  });
 }
 
 function nivelLetra(nivel){ return String(nivel || '').trim().charAt(0).toUpperCase(); }
@@ -295,8 +314,8 @@ async function loadData(){
   $('loadBtn').disabled = true;
   log('Cargando datos desde Sincronizado e Import…');
   try{
-    const res = await fetch(`${SCRIPT_URL}?action=data&_=${Date.now()}`);
-    const data = await res.json();
+    const url = `${SCRIPT_URL}?action=data&_=${Date.now()}`;
+    const data = await fetchJSONP(url);
     if (data.error) throw new Error(data.error);
 
     if (data.formato === 'compacto_v1'){
@@ -321,9 +340,9 @@ async function loadData(){
     poblarCodigos();
     poblarTipos();
     actualizarOpcionesNivel();
-  }catch(err){
+  } catch(err){
     log('Error al cargar datos: ' + err.message, 'err');
-  }finally{
+  } finally {
     $('loadBtn').disabled = false;
   }
 }
@@ -452,10 +471,6 @@ function aplicarFiltroCodSap(){
   });
 }
 
-/* ============================================================
-   LÓGICA DE BÚSQUEDA POR BLOQUES DE 3 UBICACIONES EN RACK DESTINO
-   ============================================================ */
-
 function grupoUbic(ubic){ return Math.floor((parseInt(ubic, 10) - 1) / 3); }
 
 $('calcBtn').addEventListener('click', calcular);
@@ -508,7 +523,6 @@ function calcular(){
 }
 
 function buscarUbicacionBloque(pallet, slots, byNivelPar, rackDestino, nivelInicio, nivelFinal, tipoDestino){
-  // 1. Filtrar ubicaciones del Rack Destino (si está definido) y en Rango de Niveles
   let candidatas = slots.filter(s => {
     const rackMatch = !rackDestino || normRack(s.rack) === normRack(rackDestino);
     const nivelOk = enRango(s.nivel, nivelInicio, nivelFinal);
@@ -519,7 +533,6 @@ function buscarUbicacionBloque(pallet, slots, byNivelPar, rackDestino, nivelInic
 
   if (!candidatas.length) return null;
 
-  // 2. Agrupar en bloques de 3 por Rack + Bloque
   const bloquesMap = new Map();
   candidatas.forEach(s => {
     const bNum = grupoUbic(s.ubic);
@@ -530,7 +543,7 @@ function buscarUbicacionBloque(pallet, slots, byNivelPar, rackDestino, nivelInic
 
   const bloques = [...bloquesMap.values()];
 
-  // PASADA 1: Bloques que ya tienen el mismo Cód. SAP
+  // Pasada 1: Bloques que ya poseen el mismo código SAP
   for (const bloque of bloques){
     const codigosEnBloque = bloque.map(s => s.codSap).filter(Boolean);
     if (codigosEnBloque.includes(pallet.codSap)){
@@ -544,7 +557,7 @@ function buscarUbicacionBloque(pallet, slots, byNivelPar, rackDestino, nivelInic
     }
   }
 
-  // PASADA 2: Bloques completamente vacíos
+  // Pasada 2: Bloques totalmente vacíos
   for (const bloque of bloques){
     const codigosEnBloque = bloque.map(s => s.codSap).filter(Boolean);
     if (codigosEnBloque.length === 0){
@@ -565,7 +578,6 @@ function slotUtilizable(slot, pallet, byNivelPar){
   if (slot.codSap) return false;
   const parKey = `${normRack(slot.rack)}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
   const par = (byNivelPar.get(parKey) || []).filter(s => s !== slot);
-  
   for (const otro of par){
     if (otro.codSap && otro.codSap !== pallet.codSap) return false;
   }
@@ -594,8 +606,7 @@ async function guardar(){
 
   try{
     const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(paraGuardar))}`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const data = await fetchJSONP(url);
     if (data.error) throw new Error(data.error);
     log('Guardado correctamente en la hoja Import.', 'ok');
   }catch(err){
