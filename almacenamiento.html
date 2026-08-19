@@ -203,7 +203,7 @@
     <button class="btn-secondary" id="verVaciasBtn" type="button">Ver ubicaciones vacías</button>
     <div class="tablewrap" id="vaciasWrap" style="margin-top:12px; display:none;">
       <table>
-        <thead><tr><th>Ubicación</th><th>Posición</th><th>Nivel</th><th>Tipo</th></tr></thead>
+        <thead><tr><th>Ubicación</th><th>Posición</th><th>Nivel</th><th>Tipo</th><th>Pallet a asignar</th><th></th></tr></thead>
         <tbody id="vaciasBody"></tbody>
       </table>
     </div>
@@ -656,7 +656,9 @@ function aplicarFiltroCodSap(){
  * inicio/final y Tipo de Rack; PILAR queda excluido siempre). Útil cuando
  * no hay ningún bloque con el código buscado y hace falta elegir manualmente.
  */
-$('verVaciasBtn').addEventListener('click', () => {
+$('verVaciasBtn').addEventListener('click', renderVacias);
+
+function renderVacias(){
   const rackDestino = $('rackDestino').value;
   const tipoDestino = $('tipoDestino').value;
   const nivelInicio = $('nivelInicio').value;
@@ -683,20 +685,95 @@ $('verVaciasBtn').addEventListener('click', () => {
   if (tipoDestino) vacias = vacias.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
   vacias.sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
 
+  const pendientesParaElegir = importData.filter(p => !p.ubicacion);
+  const opcionesPallet = pendientesParaElegir.length
+    ? '<option value="">Elegir pallet…</option>' + pendientesParaElegir.map(p =>
+        `<option value="${esc(p.nPallet)}">${esc(p.nPallet)} — ${esc(p.codSap)} ${esc(p.descripcion).slice(0,30)}</option>`
+      ).join('')
+    : '<option value="">(no hay pallets pendientes)</option>';
+
   body.innerHTML = '';
   if (!vacias.length){
-    body.innerHTML = '<tr><td colspan="4" class="empty">No hay ubicaciones vacías con estos filtros.</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" class="empty">No hay ubicaciones vacías con estos filtros.</td></tr>';
   } else {
     vacias.forEach(s => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${esc(s.ubicacion)}</td><td>${esc(s.ubic)}</td><td>${esc(s.nivel)}</td><td>${esc(s.tipo)}</td>`;
+      tr.innerHTML = `
+        <td>${esc(s.ubicacion)}</td><td>${esc(s.ubic)}</td><td>${esc(s.nivel)}</td><td>${esc(s.tipo)}</td>
+        <td><select class="vacia-pallet-select" style="min-width:180px;">${opcionesPallet}</select></td>
+        <td><button type="button" class="btn-primary btn-asignar-vacia" data-ubicacion="${esc(s.ubicacion)}" style="padding:6px 10px; font-size:12px;">Asignar</button></td>
+      `;
       body.appendChild(tr);
     });
   }
   wrap.style.display = '';
   log(`Rack ${normRack(rackDestino)}: ${vacias.length} ubicación(es) vacía(s) disponible(s) con los filtros actuales.`, vacias.length ? 'ok' : 'warn');
+}
+
+/** Reconstruye el índice de pares Frente/Fondo desde el estado ACTUAL de
+ * sincronizado (incluye reservas hechas manualmente en esta sesión). */
+function construirByNivelParActual(){
+  const map = new Map();
+  sincronizado.forEach(s => {
+    const key = `${s.rack}|${s.ubic}|${nivelLetra(s.nivel)}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(s);
+  });
+  return map;
+}
+
+// Delegado: click en "Asignar" dentro de la tabla de ubicaciones vacías
+$('vaciasBody').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.btn-asignar-vacia');
+  if (!btn) return;
+  const tr = btn.closest('tr');
+  const select = tr.querySelector('.vacia-pallet-select');
+  const nPallet = select.value;
+  if (!nPallet){
+    log('Elegí un pallet antes de asignar.', 'err');
+    return;
+  }
+  const pallet = importData.find(p => p.nPallet === nPallet);
+  const ubicacion = btn.dataset.ubicacion;
+  const slot = sincronizado.find(s => s.ubicacion === ubicacion);
+  if (!pallet || !slot){
+    log('No se encontró el pallet o la ubicación (¿se recargaron los datos?).', 'err');
+    return;
+  }
+
+  const byNivelPar = construirByNivelParActual();
+  if (!slotUtilizable(slot, pallet, byNivelPar)){
+    log(`No se puede asignar ${pallet.nPallet} a ${ubicacion}: no cumple la regla de par Doble (mismo código/fecha, o cantidad Frente≤Fondo) o ya está ocupada.`, 'err');
+    return;
+  }
+
+  ocuparSlot(slot, pallet); // reserva la ubicación de verdad en "sincronizado" (persiste en la sesión)
+  aplicarAsignacionEnTabla(pallet, ubicacion, 'asignado (manual)');
+  log(`Asignado manualmente: Pallet ${pallet.nPallet} (${pallet.codSap}) → ${ubicacion}`, 'ok');
+  renderVacias(); // refresca la lista: esa ubicación ya no debe aparecer
 });
 
+/** Refleja una asignación (automática o manual) en la tabla de Resultados y
+ * en el arreglo `asignaciones` que usa Guardar en Sheet. */
+function aplicarAsignacionEnTabla(pallet, ubicacion, estado){
+  const idx = asignaciones.findIndex(a => String(a.pallet) === String(pallet.nPallet));
+  if (idx >= 0) asignaciones[idx].ubicacion = ubicacion;
+  else asignaciones.push({ pallet: pallet.nPallet, ubicacion, row: pallet.row });
+
+  const body = $('resultBody');
+  const inputExistente = body.querySelector(`.ubic-edit[data-pallet="${CSS.escape(String(pallet.nPallet))}"]`);
+  if (inputExistente){
+    inputExistente.value = ubicacion;
+    const fila = inputExistente.closest('tr');
+    const pill = fila.querySelector('.pill');
+    if (pill){ pill.textContent = estado; pill.className = 'pill ok'; }
+  } else {
+    const vacio = body.querySelector('td.empty');
+    if (vacio) body.innerHTML = '';
+    body.appendChild(rowFor(pallet, ubicacion, estado, null));
+  }
+  $('saveBtn').disabled = asignaciones.length === 0;
+}
 
 function esc(v){
   return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
