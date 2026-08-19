@@ -384,7 +384,18 @@ async function loadData(){
     // nombres repetidos en cada fila) para que la carga de miles de filas
     // sea más liviana. Se reconstruyen los objetos de trabajo acá mismo,
     // una sola vez, así el resto del código sigue usando s.rack, s.codSap, etc.
-    if (data.formato === 'compacto_v1'){
+    if (data.formato === 'compacto_v2'){
+      // v2: sin almacen/sector (eran constantes en toda la hoja, no se usaban)
+      sincronizado = (data.sincronizado || []).map(r => ({
+        ubicacion: r[0], rack: r[1], ubic: r[2], nivel: r[3],
+        tipo: r[4], codSap: r[5], cant: r[6], lote: r[7], vencimiento: r[8]
+      }));
+      importData = (data.importData || []).map(r => ({
+        row: r[0], nPallet: r[1], hu: r[2], codSap: r[3], codigoBarra: r[4],
+        descripcion: r[5], lote: r[6], vencimiento: r[7], ubicacion: r[8], disponible: r[9]
+      }));
+    } else if (data.formato === 'compacto_v1'){
+      // v1 (compatibilidad si el backend desplegado todavía es el anterior)
       sincronizado = (data.sincronizado || []).map(r => ({
         ubicacion: r[0], almacen: r[1], sector: r[2], rack: r[3], ubic: r[4],
         nivel: r[5], tipo: r[6], codSap: r[7], cant: r[8], lote: r[9], vencimiento: r[10]
