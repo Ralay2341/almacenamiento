@@ -188,7 +188,7 @@
         </select>
       </div>
     </div>
-    <small class="note">Racks SIMPLES evalúan ubicación por ubicación (1 en 1). Racks DOBLES mantienen bloques de 3 en 3. Si eliges un Código SAP o Rack, la búsqueda se acota a los valores seleccionados.</small>
+    <small class="note">Racks SIMPLES evalúan ubicación por ubicación (1 en 1) y obvian la fecha de vencimiento. Racks DOBLES mantienen bloques de 3 en 3 y validación estricta de fecha.</small>
   </div>
 
   <div class="card">
@@ -323,28 +323,20 @@ function ordenNivelParaAsignar(slot){
 }
 
 /**
- * Compara dos fechas de vencimiento (dd/mm/yyyy).
- * - DOBLE: exige coincidencia exacta (día, mes y año).
- * - SIMPLE u otros: valida exclusivamente Mes y Año.
+ * Compara fechas de vencimiento según el tipo de rack.
+ * - SIMPLES: Se obvia la fecha de vencimiento por completo (retorna true para buscar solo por Código SAP, Rack y Nivel).
+ * - DOBLES: Mantiene la restricción exacta de fecha.
  */
 function coincidenFechasVencimiento(f1, f2, tipoSlot){
+  const esDoble = String(tipoSlot || '').trim().toUpperCase() === 'DOBLE';
+  
+  if (!esDoble) {
+    return true; // En SIMPLES se ignora/obvia la fecha
+  }
+
   const str1 = String(f1 || '').trim();
   const str2 = String(f2 || '').trim();
   if (!str1 || !str2) return str1 === str2;
-
-  const esDoble = String(tipoSlot || '').trim().toUpperCase() === 'DOBLE';
-  if (esDoble) {
-    return str1 === str2;
-  }
-
-  const p1 = str1.split(/[/.-]/);
-  const p2 = str2.split(/[/.-]/);
-
-  if (p1.length === 3 && p2.length === 3) {
-    if (p1[0].length <= 2 && p1[2].length === 4 && p2[0].length <= 2 && p2[2].length === 4) {
-      return p1[1].padStart(2, '0') === p2[1].padStart(2, '0') && p1[2] === p2[2];
-    }
-  }
   return str1 === str2;
 }
 
@@ -586,7 +578,7 @@ function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivel
   const fechas = [...new Set(mismoCodigo.map(s => s.vencimiento || '(sin fecha)'))];
   const todasCompatibles = mismoCodigo.every(s => coincidenFechasVencimiento(s.vencimiento, pallet.vencimiento, s.tipo));
   if (todasCompatibles){
-    return { tipo: 'misma_fecha', bloqueKey, texto: `Rack ${etiqueta}: mismo código con fecha compatible (${fechas.join(', ')}).` };
+    return { tipo: 'misma_fecha', bloqueKey, texto: `Rack ${etiqueta}: mismo código encontrado.` };
   }
   return { tipo: 'fecha_distinta', bloqueKey, texto: `Rack ${etiqueta}: mismo código con fecha no compatible (${fechas.join(', ')}).` };
 }
@@ -604,7 +596,7 @@ function rowFor(p, ubicPropuesta, estado, coincidencia){
                       : coincidencia.tipo === 'misma_fecha' ? 'ok'
                       : 'muted';
     const coincTexto = coincidencia.tipo === 'fecha_distinta' ? '⚠ Fecha distinta'
-                      : coincidencia.tipo === 'misma_fecha' ? '✓ Misma fecha'
+                      : coincidencia.tipo === 'misma_fecha' ? '✓ Coincide Código'
                       : 'Sin coincidencia';
     coincidenciaHtml = `<span class="pill ${coincClass}" title="${esc(coincidencia.texto)}">${coincTexto}</span>`;
   }
@@ -864,9 +856,9 @@ function calcular(){
 
 /**
  * RECORRIDO POR POSICIONES Y BLOQUES:
- * - SIMPLES: Evalúa ubicación por ubicación (1 en 1: 01, 02, 03...) recorriendo sus niveles.
- * - DOBLES: Evalúa bloques de 3 en 3.
- * PASADA 1: Revisa ubicaciones que contengan el mismo Código SAP y fecha compatible.
+ * - SIMPLES: Evalúa ubicación por ubicación (1 en 1) y ignora la fecha.
+ * - DOBLES: Evalúa bloques de 3 en 3 y aplica la regla de fecha.
+ * PASADA 1: Revisa ubicaciones que contengan el mismo Código SAP.
  * PASADA 2: Revisa ubicaciones totalmente vacías de menor a mayor.
  */
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
@@ -878,7 +870,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
   };
 
   // -------------------------------------------------------------------------
-  // PASADA 1: Recorrer posiciones/bloques que contengan el CÓDIGO SAP y misma fecha
+  // PASADA 1: Recorrer posiciones/bloques que contengan el CÓDIGO SAP
   // -------------------------------------------------------------------------
   for (const bloque of bloques){
     const candidatosBloque = candidatosDe(bloque);
@@ -919,7 +911,7 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
       }
     }
 
-    // 1b. Asignar en otra vacante disponible dentro del mismo grupo
+    // 1b. Asignar en otra vacante disponible dentro del mismo grupo/ubicación
     const libresEnBloqueConMatch = candidatosBloque
       .slice()
       .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
