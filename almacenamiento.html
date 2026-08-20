@@ -73,6 +73,7 @@
   .btn-primary{background:var(--accent); color:#241100;}
   .btn-secondary{background:var(--panel2); color:var(--text); border:1px solid var(--border);}
   .btn-success{background:var(--accent2); color:#04241a;}
+  .btn-danger{background:var(--danger); color:#fff;}
 
   .stats{display:flex; gap:10px; flex-wrap:wrap;}
   .stat{
@@ -247,11 +248,13 @@
 
 </main>
 
+<!-- Footerbar con 4 botones integrados -->
 <div class="footerbar">
   <div class="footerbar-inner">
     <button class="btn-secondary" id="loadBtn">Cargar datos</button>
     <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
     <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
+    <button class="btn-secondary" id="limpiarBtn">Limpiar</button>
   </div>
 </div>
 
@@ -322,17 +325,9 @@ function ordenNivelParaAsignar(slot){
   return base + (Number(prof) || 1);
 }
 
-/**
- * Compara fechas de vencimiento según el tipo de rack.
- * - SIMPLES: Se obvia la fecha de vencimiento por completo (retorna true para buscar solo por Código SAP, Rack y Nivel).
- * - DOBLES: Mantiene la restricción exacta de fecha.
- */
 function coincidenFechasVencimiento(f1, f2, tipoSlot){
   const esDoble = String(tipoSlot || '').trim().toUpperCase() === 'DOBLE';
-  
-  if (!esDoble) {
-    return true; // En SIMPLES se ignora/obvia la fecha
-  }
+  if (!esDoble) return true;
 
   const str1 = String(f1 || '').trim();
   const str2 = String(f2 || '').trim();
@@ -342,18 +337,11 @@ function coincidenFechasVencimiento(f1, f2, tipoSlot){
 
 /* ---------------- Reglas de Agrupación por Tipo ---------------- */
 
-/**
- * Determina el grupo de la ubicación.
- * - SIMPLES: Cada posición (01, 02, 03...) es su propio bloque (1 en 1).
- * - DOBLES: Se mantiene la agrupación en bloques de 3 en 3 (1-3, 4-6...).
- */
 function grupoUbic(ubic, tipo){
   const n = Number(ubic) || 0;
   const esDoble = String(tipo || '').trim().toUpperCase() === 'DOBLE';
-  if (!esDoble) {
-    return n; // Bloques individuales (1 en 1)
-  }
-  return Math.ceil(n / 3) || 1; // Bloques de 3 en 3
+  if (!esDoble) return n;
+  return Math.ceil(n / 3) || 1;
 }
 
 function bloqueDe(rack, ubic, tipo){
@@ -854,13 +842,6 @@ function calcular(){
   aplicarFiltroCodSap();
 }
 
-/**
- * RECORRIDO POR POSICIONES Y BLOQUES:
- * - SIMPLES: Evalúa ubicación por ubicación (1 en 1) y ignora la fecha.
- * - DOBLES: Evalúa bloques de 3 en 3 y aplica la regla de fecha.
- * PASADA 1: Revisa ubicaciones que contengan el mismo Código SAP.
- * PASADA 2: Revisa ubicaciones totalmente vacías de menor a mayor.
- */
 function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
   const candidatosDe = (bloque) => {
     let c = slots.filter(s => bloqueDe(s.rack, s.ubic, s.tipo) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
@@ -869,9 +850,6 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     return c;
   };
 
-  // -------------------------------------------------------------------------
-  // PASADA 1: Recorrer posiciones/bloques que contengan el CÓDIGO SAP
-  // -------------------------------------------------------------------------
   for (const bloque of bloques){
     const candidatosBloque = candidatosDe(bloque);
     if (!candidatosBloque.length) continue;
@@ -882,7 +860,6 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
 
     if (!hayCoincidenciaCodigo) continue;
 
-    // 1a. Prioridad Vertical: Apilar en la columna con mismo código
     const columnasConMismoCodigo = new Set(
       candidatosBloque
         .filter(s => s.codSap === pallet.codSap && coincidenFechasVencimiento(s.vencimiento, pallet.vencimiento, s.tipo))
@@ -911,7 +888,6 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
       }
     }
 
-    // 1b. Asignar en otra vacante disponible dentro del mismo grupo/ubicación
     const libresEnBloqueConMatch = candidatosBloque
       .slice()
       .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
@@ -930,9 +906,6 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     }
   }
 
-  // -------------------------------------------------------------------------
-  // PASADA 2: Si no hay vacantes con ese código, usar posiciones o bloques vacíos
-  // -------------------------------------------------------------------------
   for (const bloque of bloques){
     const candidatosBloque = candidatosDe(bloque);
     if (!candidatosBloque.length) continue;
@@ -1052,6 +1025,29 @@ async function guardar(){
   if (okCount) {
     log('Recargá los datos para ver Import actualizado.', 'ok');
   }
+}
+
+/* ---------------- Acción de Limpieza ---------------- */
+
+$('limpiarBtn').addEventListener('click', limpiarVista);
+
+function limpiarVista(){
+  asignaciones = [];
+  sincronizado = [];
+  importData = [];
+  $('resultBody').innerHTML = '<tr><td colspan="10" class="empty">Cargá los datos para ver resultados.</td></tr>';
+  $('vaciasBody').innerHTML = '';
+  $('vaciasWrap').style.display = 'none';
+  $('filtroCodSap').value = '';
+  $('filtroInfo').textContent = '';
+  $('calcBtn').disabled = true;
+  $('saveBtn').disabled = true;
+  $('stTotal').textContent = '0';
+  $('stAsig').textContent = '0';
+  $('stPend').textContent = '0';
+  $('stSin').textContent = '0';
+  $('stLibres').textContent = '0';
+  log('Vista y variables reiniciadas.', 'warn');
 }
 </script>
 </body>
