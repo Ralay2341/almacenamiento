@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Almacenamiento — ALM9037</title>
+<title>AlmacenImpo — ALM9037</title>
 <style>
   :root{
     --bg:#0d1117;
@@ -248,13 +248,12 @@
 
 </main>
 
-<!-- Footerbar con 4 botones integrados -->
 <div class="footerbar">
   <div class="footerbar-inner">
     <button class="btn-secondary" id="loadBtn">Cargar datos</button>
     <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
     <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
-    <button class="btn-secondary" id="limpiarBtn">Limpiar</button>
+    <button class="btn-secondary" id="sincroBtn">Sincronizar 🔄</button>
   </div>
 </div>
 
@@ -287,7 +286,7 @@ function log(msg, cls){
   el.prepend(line);
 }
 
-/* ---------------- Utilidades de Nivel y Fechas ---------------- */
+/* ---------------- Utilidades ---------------- */
 
 function nivelLetra(nivel){
   return String(nivel || '').trim().charAt(0).toUpperCase();
@@ -334,8 +333,6 @@ function coincidenFechasVencimiento(f1, f2, tipoSlot){
   if (!str1 || !str2) return str1 === str2;
   return str1 === str2;
 }
-
-/* ---------------- Reglas de Agrupación por Tipo ---------------- */
 
 function grupoUbic(ubic, tipo){
   const n = Number(ubic) || 0;
@@ -403,15 +400,6 @@ async function loadData(){
       sincronizado = (data.sincronizado || []).map(r => ({
         ubicacion: r[0], rack: r[1], ubic: r[2], nivel: r[3],
         tipo: r[4], codSap: r[5], cant: r[6], lote: r[7], vencimiento: r[8]
-      }));
-      importData = (data.importData || []).map(r => ({
-        row: r[0], nPallet: r[1], hu: r[2], codSap: r[3], codigoBarra: r[4],
-        descripcion: r[5], lote: r[6], vencimiento: r[7], ubicacion: r[8], disponible: r[9]
-      }));
-    } else if (data.formato === 'compacto_v1'){
-      sincronizado = (data.sincronizado || []).map(r => ({
-        ubicacion: r[0], almacen: r[1], sector: r[2], rack: r[3], ubic: r[4],
-        nivel: r[5], tipo: r[6], codSap: r[7], cant: r[8], lote: r[9], vencimiento: r[10]
       }));
       importData = (data.importData || []).map(r => ({
         row: r[0], nPallet: r[1], hu: r[2], codSap: r[3], codigoBarra: r[4],
@@ -518,14 +506,8 @@ function esRackConDoble(rack){
 function actualizarOpcionesNivel(){
   const tipo = $('tipoDestino') ? $('tipoDestino').value : '';
   const rack = $('rackDestino') ? $('rackDestino').value : '';
-  let esDoble;
-  if (tipo){
-    esDoble = tipo === 'DOBLE';
-  } else if (rack){
-    esDoble = esRackConDoble(rack);
-  } else {
-    esDoble = false;
-  }
+  let esDoble = tipo ? tipo === 'DOBLE' : (rack ? esRackConDoble(rack) : false);
+
   const inicioSel = $('nivelInicio');
   const finalSel = $('nivelFinal');
   const prevInicio = inicioSel.value;
@@ -540,7 +522,6 @@ function actualizarOpcionesNivel(){
 }
 $('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
 $('rackDestino') && $('rackDestino').addEventListener('change', actualizarOpcionesNivel);
-actualizarOpcionesNivel();
 
 function renderPreview(){
   const body = $('resultBody');
@@ -630,13 +611,7 @@ function aplicarFiltroCodSap(){
     if (coincide) visibles++;
   });
   const info = $('filtroInfo');
-  if (!filas.length){
-    info.textContent = '';
-  } else if (q){
-    info.textContent = `Mostrando ${visibles} de ${filas.length} filas para "${q}".`;
-  } else {
-    info.textContent = '';
-  }
+  info.textContent = q ? `Mostrando ${visibles} de ${filas.length} filas para "${q}".` : '';
 }
 
 $('verVaciasBtn').addEventListener('click', renderVacias);
@@ -650,12 +625,8 @@ function renderVacias(){
   const body = $('vaciasBody');
 
   if (!rackDestino){
-    log('Elegí un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
+    log('Elegí un Rack destino para ver sus ubicaciones vacías.', 'err');
     wrap.style.display = 'none';
-    return;
-  }
-  if (!sincronizado.length){
-    log('Primero cargá los datos (Cargar datos).', 'err');
     return;
   }
 
@@ -690,74 +661,13 @@ function renderVacias(){
     });
   }
   wrap.style.display = '';
-  log(`Rack ${normRack(rackDestino)}: ${vacias.length} ubicación(es) vacía(s) disponible(s).`, vacias.length ? 'ok' : 'warn');
-}
-
-function construirByNivelParActual(){
-  const map = new Map();
-  sincronizado.forEach(s => {
-    const key = `${s.rack}|${s.ubic}|${nivelLetra(s.nivel)}`;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(s);
-  });
-  return map;
-}
-
-$('vaciasBody').addEventListener('click', (ev) => {
-  const btn = ev.target.closest('.btn-asignar-vacia');
-  if (!btn) return;
-  const tr = btn.closest('tr');
-  const select = tr.querySelector('.vacia-pallet-select');
-  const nPallet = select.value;
-  if (!nPallet){
-    log('Elegí un pallet antes de asignar.', 'err');
-    return;
-  }
-  const pallet = importData.find(p => p.nPallet === nPallet);
-  const ubicacion = btn.dataset.ubicacion;
-  const slot = sincronizado.find(s => s.ubicacion === ubicacion);
-  if (!pallet || !slot){
-    log('No se encontró el pallet o la ubicación.', 'err');
-    return;
-  }
-
-  const byNivelPar = construirByNivelParActual();
-  if (!slotUtilizable(slot, pallet, byNivelPar)){
-    log(`No se puede asignar ${pallet.nPallet} a ${ubicacion}: no cumple reglas de asignación.`, 'err');
-    return;
-  }
-
-  ocuparSlot(slot, pallet);
-  aplicarAsignacionEnTabla(pallet, ubicacion, 'asignado (manual)');
-  log(`Asignado manualmente: Pallet ${pallet.nPallet} (${pallet.codSap}) → ${ubicacion}`, 'ok');
-  renderVacias();
-});
-
-function aplicarAsignacionEnTabla(pallet, ubicacion, estado){
-  const idx = asignaciones.findIndex(a => String(a.pallet) === String(pallet.nPallet));
-  if (idx >= 0) asignaciones[idx].ubicacion = ubicacion;
-  else asignaciones.push({ pallet: pallet.nPallet, ubicacion, row: pallet.row });
-
-  const body = $('resultBody');
-  const inputExistente = body.querySelector(`.ubic-edit[data-pallet="${CSS.escape(String(pallet.nPallet))}"]`);
-  if (inputExistente){
-    inputExistente.value = ubicacion;
-    const fila = inputExistente.closest('tr');
-    const pill = fila.querySelector('.pill');
-    if (pill){ pill.textContent = estado; pill.className = 'pill ok'; }
-  } else {
-    const vacio = body.querySelector('td.empty');
-    if (vacio) body.innerHTML = '';
-    body.appendChild(rowFor(pallet, ubicacion, estado, null));
-  }
-  $('saveBtn').disabled = asignaciones.length === 0;
 }
 
 function esc(v){
   return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
-/* ---------------- Motor de asignación ---------------- */
+/* ---------------- Motor de Asignación ---------------- */
 
 $('calcBtn').addEventListener('click', calcular);
 
@@ -774,8 +684,8 @@ function calcular(){
   const tipoDestino = $('tipoDestino').value;
 
   const slots = sincronizado.map(r => ({...r}));
-
   const slotsPorUbicacion = new Map(slots.map(s => [s.ubicacion, s]));
+
   importData.forEach(p => {
     if (!p.ubicacion) return;
     const slotReservado = slotsPorUbicacion.get(p.ubicacion);
@@ -793,31 +703,27 @@ function calcular(){
     const posKey = `${s.rack}|${s.ubic}`;
     if (!byPosBase.has(posKey)) byPosBase.set(posKey, []);
     byPosBase.get(posKey).push(s);
+
     const parKey = `${s.rack}|${s.ubic}|${nivelLetra(s.nivel)}`;
     if (!byNivelPar.has(parKey)) byNivelPar.set(parKey, []);
     byNivelPar.get(parKey).push(s);
   });
 
   const bloques = listarBloques(slots, rackDestino);
-
   let pendientes = importData.filter(p => modo === 'todos' ? true : !p.ubicacion);
   if (codigoDestino) pendientes = pendientes.filter(p => String(p.codSap).trim() === codigoDestino);
+
   pendientes.sort((a,b) => String(a.nPallet).localeCompare(String(b.nPallet), 'es', {numeric:true}));
 
   asignaciones = [];
   const body = $('resultBody');
   body.innerHTML = '';
 
-  if (codigoDestino) log(`Filtrado por Cód. SAP ${codigoDestino} (${pendientes.length} pend.).`);
-  if (rackDestino) log(`Evaluando posiciones/bloques del Rack ${normRack(rackDestino)}.`);
-  if (tipoDestino) log(`Acotado a Tipo ${tipoDestino}.`);
-
   let yaAsignados = importData.filter(p => modo === 'todos' ? false : !!p.ubicacion);
   if (codigoDestino) yaAsignados = yaAsignados.filter(p => String(p.codSap).trim() === codigoDestino);
   yaAsignados.forEach(p => body.appendChild(rowFor(p, p.ubicacion, 'ya asignado')));
 
   let sinUbicacion = 0;
-
   pendientes.forEach(p => {
     const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino);
     if (resultado){
@@ -854,54 +760,16 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     const candidatosBloque = candidatosDe(bloque);
     if (!candidatosBloque.length) continue;
 
-    const hayCoincidenciaCodigo = candidatosBloque.some(s => 
+    const hayMatch = candidatosBloque.some(s => 
       s.codSap === pallet.codSap && coincidenFechasVencimiento(s.vencimiento, pallet.vencimiento, s.tipo)
     );
+    if (!hayMatch) continue;
 
-    if (!hayCoincidenciaCodigo) continue;
-
-    const columnasConMismoCodigo = new Set(
-      candidatosBloque
-        .filter(s => s.codSap === pallet.codSap && coincidenFechasVencimiento(s.vencimiento, pallet.vencimiento, s.tipo))
-        .map(s => `${s.rack}|${s.ubic}`)
-    );
-
-    for (const posKey of columnasConMismoCodigo){
-      const columna = (byPosBase.get(posKey) || []).filter(s => 
-        enRango(s.nivel, nivelInicio, nivelFinal) && 
-        String(s.tipo).trim().toUpperCase() !== 'PILAR' && 
-        (!tipoDestino || String(s.tipo).trim().toUpperCase() === tipoDestino)
-      );
-      columna.sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
-
-      for (const slot of columna){
-        if (slotUtilizable(slot, pallet, byNivelPar)){
-          ocuparSlot(slot, pallet);
-          return { 
-            ubicacion: slot.ubicacion, 
-            motivo: 'apilado vertical en misma ubicación/código', 
-            bloqueKey: bloque.key, 
-            rack: slot.rack, 
-            ubic: slot.ubic 
-          };
-        }
-      }
-    }
-
-    const libresEnBloqueConMatch = candidatosBloque
-      .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
-
-    for (const slot of libresEnBloqueConMatch){
+    const libresEnBloque = candidatosBloque.slice().sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
+    for (const slot of libresEnBloque){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
-        return { 
-          ubicacion: slot.ubicacion, 
-          motivo: `Rack ${bloque.rack} pos/bloque ${bloque.grupo}, asignado por coincidencia`, 
-          bloqueKey: bloque.key, 
-          rack: slot.rack, 
-          ubic: slot.ubic 
-        };
+        return { ubicacion: slot.ubicacion, motivo: `Coincidencia Código/Bloque G${bloque.grupo}`, bloqueKey: bloque.key };
       }
     }
   }
@@ -910,37 +778,11 @@ function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelIni
     const candidatosBloque = candidatosDe(bloque);
     if (!candidatosBloque.length) continue;
 
-    const picking = candidatosBloque
-      .filter(s => s.tipo === 'PICKING' && s.codSap === pallet.codSap)
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)));
-
-    for (const slot of picking){
-      if (slotUtilizable(slot, pallet, byNivelPar)){
-        ocuparSlot(slot, pallet);
-        return { 
-          ubicacion: slot.ubicacion, 
-          motivo: 'ubicación PICKING', 
-          bloqueKey: bloque.key, 
-          rack: slot.rack, 
-          ubic: slot.ubic 
-        };
-      }
-    }
-
-    const libres = candidatosBloque
-      .slice()
-      .sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
-
+    const libres = candidatosBloque.slice().sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
     for (const slot of libres){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
-        return { 
-          ubicacion: slot.ubicacion, 
-          motivo: `Rack ${bloque.rack} pos/bloque ${bloque.grupo}, primera disponible`, 
-          bloqueKey: bloque.key, 
-          rack: slot.rack, 
-          ubic: slot.ubic 
-        };
+        return { ubicacion: slot.ubicacion, motivo: `Primera disponible Rack ${bloque.rack}`, bloqueKey: bloque.key };
       }
     }
   }
@@ -953,19 +795,11 @@ function slotUtilizable(slot, pallet, byNivelPar){
   const parKey = `${slot.rack}|${slot.ubic}|${nivelLetra(slot.nivel)}`;
   const par = (byNivelPar.get(parKey) || []).filter(s => s !== slot);
   if (!par.length) return true;
+
   for (const otro of par){
     if (!otro.codSap) continue;
-    const mismoProducto = otro.codSap === pallet.codSap && coincidenFechasVencimiento(otro.vencimiento, pallet.vencimiento, slot.tipo);
-    if (!mismoProducto) return false;
-
-    if (String(slot.tipo).trim().toUpperCase() === 'DOBLE'){
-      const profSlot = nivelProfundidad(slot.nivel);
-      const profOtro = nivelProfundidad(otro.nivel);
-      const cantPallet = Number(pallet.disponible) || 0;
-      const cantOtro = Number(otro.cant) || 0;
-      if (profSlot === '1' && profOtro === '2' && cantPallet > cantOtro) return false;
-      if (profSlot === '2' && profOtro === '1' && cantPallet < cantOtro) return false;
-    }
+    const mismoProd = otro.codSap === pallet.codSap && coincidenFechasVencimiento(otro.vencimiento, pallet.vencimiento, slot.tipo);
+    if (!mismoProd) return false;
   }
   return true;
 }
@@ -977,7 +811,7 @@ function ocuparSlot(slot, pallet){
   slot.cant = Number(pallet.disponible) || 0;
 }
 
-/* ---------------- Guardado en Sheet ---------------- */
+/* ---------------- Guardar en Sheet ---------------- */
 
 $('saveBtn').addEventListener('click', guardar);
 
@@ -990,64 +824,55 @@ async function guardar(){
   });
 
   const paraGuardar = asignaciones
-    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '' }))
+    .map(a => ({ pallet: a.pallet, ubicacion: porPallet.get(String(a.pallet)) || '', row: a.row }))
     .filter(a => a.ubicacion);
 
   if (!paraGuardar.length){
     log('No hay asignaciones para guardar.', 'err');
     return;
   }
-  if (!SCRIPT_URL){
-    log('Falta configurar la URL del Apps Script.', 'err');
-    return;
-  }
 
   $('saveBtn').disabled = true;
-  log(`Guardando ${paraGuardar.length} ubicaciones en Import!H…`);
+  log(`Guardando ${paraGuardar.length} asignaciones en la hoja Import…`);
 
-  const LOTE = 25;
-  let okCount = 0, errCount = 0;
-  for (let i = 0; i < paraGuardar.length; i += LOTE){
-    const chunk = paraGuardar.slice(i, i + LOTE);
-    try{
-      const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(chunk))}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      (data.results || []).forEach(r => r.ok ? okCount++ : errCount++);
-    }catch(err){
-      errCount += chunk.length;
-      log('Error guardando lote: ' + err.message, 'err');
-    }
-  }
-
-  log(`Guardado terminado: ${okCount} OK, ${errCount} con error.`, errCount ? 'err' : 'ok');
-  if (okCount) {
-    log('Recargá los datos para ver Import actualizado.', 'ok');
+  try {
+    const url = `${SCRIPT_URL}?action=saveBatch&data=${encodeURIComponent(JSON.stringify(paraGuardar))}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    log(`Guardado exitoso en Google Sheet.`, 'ok');
+    await loadData();
+  } catch(err) {
+    log('Error guardando en la hoja: ' + err.message, 'err');
+  } finally {
+    $('saveBtn').disabled = false;
   }
 }
 
-/* ---------------- Acción de Limpieza ---------------- */
+/* ---------------- Acción del Botón Sincronizar ---------------- */
 
-$('limpiarBtn').addEventListener('click', limpiarVista);
+$('sincroBtn').addEventListener('click', sincronizarUbicacionesSheet);
 
-function limpiarVista(){
-  asignaciones = [];
-  sincronizado = [];
-  importData = [];
-  $('resultBody').innerHTML = '<tr><td colspan="10" class="empty">Cargá los datos para ver resultados.</td></tr>';
-  $('vaciasBody').innerHTML = '';
-  $('vaciasWrap').style.display = 'none';
-  $('filtroCodSap').value = '';
-  $('filtroInfo').textContent = '';
-  $('calcBtn').disabled = true;
-  $('saveBtn').disabled = true;
-  $('stTotal').textContent = '0';
-  $('stAsig').textContent = '0';
-  $('stPend').textContent = '0';
-  $('stSin').textContent = '0';
-  $('stLibres').textContent = '0';
-  log('Vista y variables reiniciadas.', 'warn');
+async function sincronizarUbicacionesSheet(){
+  const btn = $('sincroBtn');
+  btn.disabled = true;
+  log('Ejecutando proceso de Sincronización en Google Sheets...', 'warn');
+
+  try {
+    const res = await fetch(`${SCRIPT_URL}?action=sincronizar&_=${Date.now()}`);
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.message);
+    }
+
+    log(data.message, 'ok');
+    await loadData(); // Recarga la vista actualizada desde la hoja
+
+  } catch (err) {
+    log('Error en la sincronización: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 </script>
 </body>
