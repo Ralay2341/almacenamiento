@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Almacen_IMPO — ALM9037</title>
+<title>Almacenamiento — ALM9037</title>
 <style>
   :root{
     --bg:#0d1117;
@@ -245,6 +244,15 @@
     <small class="note" id="filtroInfo"></small>
   </div>
 
+  <div class="card" id="syncAlertCard" style="display:none;">
+    <h2>⚠ Conflictos al sincronizar</h2>
+    <p style="margin:0 0 8px; font-size:13px; color:var(--dim);">
+      Estas ubicaciones NO se sobrescribieron porque ya tenían un código
+      distinto en la columna N de Sincronizado. Revisalas manualmente.
+    </p>
+    <div id="syncAlertList"></div>
+  </div>
+
   <div class="card">
     <h2>Registro</h2>
     <div id="log">Esperando acción…</div>
@@ -257,6 +265,7 @@
     <button class="btn-secondary" id="loadBtn">Cargar datos</button>
     <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
     <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
+    <button class="btn-secondary" id="syncBtn">Sincronizado</button>
   </div>
 </div>
 
@@ -900,7 +909,7 @@ function calcular(){
   let sinUbicacion = 0;
 
   pendientes.forEach(p => {
-    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino);
+    const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino, rackDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
       const coincidencia = analizarCoincidenciaBloque(resultado.bloqueKey, p, slots, nivelInicio, nivelFinal);
@@ -955,7 +964,73 @@ function calcular(){
  * Rack elegido (si hay), y la restricción de pares Doble (Frente/Fondo
  * mismo código+lote+fecha, y cantidad Frente<=Fondo) vía slotUtilizable().
  */
-function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino){
+/**
+ * Búsqueda específica para Ubicaciones SIMPLES: NO se agrupan en bloques de
+ * 3. Se recorre el Rack posición por posición, en orden ascendente (Ubic 1,
+ * después Ubic 2, después Ubic 3...), revisando TODOS los niveles dentro
+ * del rango Nivel Inicio-Final elegido. El match es SOLO por Código SAP —
+ * la Fecha de Vencimiento NO se exige acá (a diferencia del resto de los
+ * tipos, donde sí se exige código + fecha).
+ *
+ * PASADA 1: primera posición (en orden ascendente) que ya tenga el mismo
+ * código en algún nivel -> asigna ahí (mismo código, cualquier fecha).
+ * PASADA 2: si ninguna posición tiene el código, primera posición libre.
+ */
+function buscarUbicacionSimple(pallet, slots, byNivelPar, nivelInicio, nivelFinal, rackDestino){
+  let candidatos = slots.filter(s =>
+    String(s.tipo).trim().toUpperCase() === 'SIMPLE' &&
+    enRango(s.nivel, nivelInicio, nivelFinal)
+  );
+  if (rackDestino) candidatos = candidatos.filter(s => normRack(s.rack) === normRack(rackDestino));
+  if (!candidatos.length) return null;
+
+  // Agrupar por posición (Rack+Ubic), ordenar posiciones ascendente (Rack, luego Ubic numérico)
+  const porPosicion = new Map();
+  candidatos.forEach(s => {
+    const key = `${normRack(s.rack)}|${s.ubic}`;
+    if (!porPosicion.has(key)) porPosicion.set(key, []);
+    porPosicion.get(key).push(s);
+  });
+  const posiciones = [...porPosicion.keys()].sort((a,b) => {
+    const [rackA, ubicA] = a.split('|');
+    const [rackB, ubicB] = b.split('|');
+    const rA = Number(rackA), rB = Number(rackB);
+    if (rA !== rB) return rA - rB;
+    return (Number(ubicA) || 0) - (Number(ubicB) || 0);
+  });
+
+  // PASADA 1: posición (en orden) que ya tenga el mismo código, cualquier fecha
+  for (const posKey of posiciones){
+    const niveles = porPosicion.get(posKey).slice().sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+    const hayMatch = niveles.some(s => s.codSap === pallet.codSap);
+    if (!hayMatch) continue;
+    for (const slot of niveles){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: 'SIMPLE: misma posición, mismo código (fecha no exigida)', rack: slot.rack, ubic: slot.ubic };
+      }
+    }
+  }
+
+  // PASADA 2: primera posición libre, en orden ascendente
+  for (const posKey of posiciones){
+    const niveles = porPosicion.get(posKey).slice().sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+    for (const slot of niveles){
+      if (slotUtilizable(slot, pallet, byNivelPar)){
+        ocuparSlot(slot, pallet);
+        return { ubicacion: slot.ubicacion, motivo: 'SIMPLE: primera posición disponible', rack: slot.rack, ubic: slot.ubic };
+      }
+    }
+  }
+  return null;
+}
+
+function buscarUbicacion(pallet, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino, rackDestino){
+  // Ubicaciones SIMPLES: ruta separada, posición por posición, solo código (sin fecha)
+  if (tipoDestino === 'SIMPLE'){
+    return buscarUbicacionSimple(pallet, slots, byNivelPar, nivelInicio, nivelFinal, rackDestino);
+  }
+
   const candidatosDe = (bloque) => {
     let c = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloque.key && enRango(s.nivel, nivelInicio, nivelFinal));
     c = c.filter(s => String(s.tipo).trim().toUpperCase() !== 'PILAR'); // PILAR nunca se considera para asignar
@@ -1126,6 +1201,49 @@ async function guardar(){
   log(`Guardado terminado: ${okCount} OK, ${errCount} con error.`, errCount ? 'err' : 'ok');
   if (okCount) {
     log('Recargá los datos para ver Import actualizado.', 'ok');
+  }
+}
+
+/* ---------------- Sincronizado: copiar Import -> Sincronizado ---------------- */
+
+$('syncBtn').addEventListener('click', sincronizar);
+
+async function sincronizar(){
+  if (!SCRIPT_URL || SCRIPT_URL.includes('XXXX')){
+    log('Falta configurar SCRIPT_URL en el código.', 'err');
+    return;
+  }
+  $('syncBtn').disabled = true;
+  $('syncAlertCard').style.display = 'none';
+  log('Sincronizando Import → Sincronizado (N, Q, R, S, T, AE)…');
+  try{
+    const res = await fetch(`${SCRIPT_URL}?action=sync&_=${Date.now()}`);
+    const texto = await res.text();
+    const data = JSON.parse(texto);
+    if (data.error) throw new Error(data.error);
+
+    const conflictos = (data.resultados || []).filter(r => r.alerta);
+    log(`Sincronización terminada: ${data.sincronizados || 0} fila(s) sincronizada(s), ${data.conflictos || 0} conflicto(s).`,
+        (data.conflictos || 0) ? 'err' : 'ok');
+
+    if (conflictos.length){
+      const card = $('syncAlertCard');
+      const list = $('syncAlertList');
+      list.innerHTML = conflictos.map(c => `
+        <div style="padding:8px 10px; margin-bottom:6px; border-radius:8px; background:rgba(239,68,68,.12); border:1px solid var(--danger);">
+          <strong>Pallet ${esc(c.pallet)}</strong> → ${esc(c.ubicacion)}<br>
+          <span style="color:var(--danger); font-size:13px;">${esc(c.motivo)}</span>
+        </div>
+      `).join('');
+      card.style.display = '';
+      if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    log('Recargá los datos (Cargar datos) para ver Sincronizado actualizado.', 'ok');
+  }catch(err){
+    log('Error al sincronizar: ' + err.message, 'err');
+  }finally{
+    $('syncBtn').disabled = false;
   }
 }
 </script>
