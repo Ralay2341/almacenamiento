@@ -356,6 +356,17 @@ function ordenNivelParaAsignar(slot){
   return base + (Number(prof) || 1);
 }
 
+/**
+ * Orden a mostrar en listados (ej: "Ver ubicaciones vacías"): usa el mismo
+ * criterio que el motor de asignación según el tipo —
+ *  - SIMPLE: de letra MAYOR a MENOR (G→A, o el nivel más alto real del Rack).
+ *  - DOBLE (y el resto): Fondo antes que Frente, ascendente por letra.
+ */
+function ordenParaListado(slot){
+  if (String(slot.tipo).trim().toUpperCase() === 'SIMPLE') return ordenNivelSimpleDescendente(slot);
+  return ordenNivelParaAsignar(slot);
+}
+
 
 /* ---------------- Carga de datos ---------------- */
 
@@ -693,7 +704,7 @@ function renderVacias(){
     enRango(s.nivel, nivelInicio, nivelFinal)
   );
   if (tipoDestino) vacias = vacias.filter(s => String(s.tipo).trim().toUpperCase() === tipoDestino);
-  vacias.sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b)));
+  vacias.sort((a,b) => String(a.ubic).localeCompare(String(b.ubic)) || (ordenParaListado(a) - ordenParaListado(b)));
 
   const pendientesParaElegir = importData.filter(p => !p.ubicacion);
   const opcionesPallet = pendientesParaElegir.length
@@ -975,7 +986,15 @@ function calcular(){
  * PASADA 1: primera posición (en orden ascendente) que ya tenga el mismo
  * código en algún nivel -> asigna ahí (mismo código, cualquier fecha).
  * PASADA 2: si ninguna posición tiene el código, primera posición libre.
+ *
+ * Dentro de cada posición, los niveles se prueban de MAYOR a MENOR letra
+ * (ej: si el Rack llega hasta G, arranca en G y baja hasta A; si un Rack
+ * solo tiene hasta F, arranca en F — siempre el nivel más alto REAL de esa
+ * posición dentro del rango elegido, no un valor fijo).
  */
+function ordenNivelSimpleDescendente(slot){
+  return -LETRAS.indexOf(nivelLetra(slot.nivel)); // negativo = orden descendente (G,F,E...A)
+}
 function buscarUbicacionSimple(pallet, slots, byNivelPar, nivelInicio, nivelFinal, rackDestino){
   let candidatos = slots.filter(s =>
     String(s.tipo).trim().toUpperCase() === 'SIMPLE' &&
@@ -1001,7 +1020,7 @@ function buscarUbicacionSimple(pallet, slots, byNivelPar, nivelInicio, nivelFina
 
   // PASADA 1: posición (en orden) que ya tenga el mismo código, cualquier fecha
   for (const posKey of posiciones){
-    const niveles = porPosicion.get(posKey).slice().sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+    const niveles = porPosicion.get(posKey).slice().sort((a,b) => ordenNivelSimpleDescendente(a) - ordenNivelSimpleDescendente(b));
     const hayMatch = niveles.some(s => s.codSap === pallet.codSap);
     if (!hayMatch) continue;
     for (const slot of niveles){
@@ -1014,7 +1033,7 @@ function buscarUbicacionSimple(pallet, slots, byNivelPar, nivelInicio, nivelFina
 
   // PASADA 2: primera posición libre, en orden ascendente
   for (const posKey of posiciones){
-    const niveles = porPosicion.get(posKey).slice().sort((a,b) => ordenNivelParaAsignar(a) - ordenNivelParaAsignar(b));
+    const niveles = porPosicion.get(posKey).slice().sort((a,b) => ordenNivelSimpleDescendente(a) - ordenNivelSimpleDescendente(b));
     for (const slot of niveles){
       if (slotUtilizable(slot, pallet, byNivelPar)){
         ocuparSlot(slot, pallet);
