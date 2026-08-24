@@ -195,7 +195,7 @@
   <div class="card">
     <h2>Ubicaciones vacías del Rack elegido</h2>
     <p style="margin:0 0 10px; font-size:13px; color:var(--dim);">
-      Útil cuando no hay ningún bloque con el código buscado: muestra todas las
+      Útil cuando no hay ningún bloque con el código buscado: mostrá todas las
       ubicaciones vacías disponibles del <strong>Rack destino</strong> elegido
       arriba, respetando el <strong>Nivel inicio/final</strong> y el
       <strong>Tipo de Rack</strong> seleccionados (PILAR nunca aparece).
@@ -237,7 +237,7 @@
           </tr>
         </thead>
         <tbody id="resultBody">
-          <tr><td colspan="10" class="empty">Carga los datos nuevamente para ver resultados.</td></tr>
+          <tr><td colspan="10" class="empty">Cargá los datos para ver resultados.</td></tr>
         </tbody>
       </table>
     </div>
@@ -263,7 +263,7 @@
 <div class="footerbar">
   <div class="footerbar-inner">
     <button class="btn-secondary" id="loadBtn">Cargar datos</button>
-    <button class="btn-primary" id="calcBtn" disabled>Asignar</button>
+    <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
     <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
     <button class="btn-secondary" id="syncBtn">Sincronizado</button>
   </div>
@@ -583,10 +583,19 @@ function renderPreview(){
  * sus niveles) y el rango de Nivel Inicial-Final seleccionado, si el mismo
  * Cód. SAP ya existe ahí, y si todas esas ocurrencias comparten la misma
  * Fecha de Vencimiento o no.
+ *
+ * IMPORTANTE: excluirUbicacion debe ser la ubicación recién asignada a este
+ * mismo pallet — sin esto, como el slot ya quedó ocupado (ocuparSlot corre
+ * ANTES de este análisis), el pallet se compara contra sí mismo y siempre
+ * "encuentra" 1 coincidencia falsa (él mismo).
  */
-function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivelFinal){
+function analizarCoincidenciaBloque(bloqueKey, pallet, slots, nivelInicio, nivelFinal, excluirUbicacion){
   if (!bloqueKey) return null;
-  const candidatos = slots.filter(s => bloqueDe(s.rack, s.ubic) === bloqueKey && enRango(s.nivel, nivelInicio, nivelFinal));
+  const candidatos = slots.filter(s =>
+    bloqueDe(s.rack, s.ubic) === bloqueKey &&
+    enRango(s.nivel, nivelInicio, nivelFinal) &&
+    s.ubicacion !== excluirUbicacion // no contar la ubicación que se acaba de asignar
+  );
   const mismoCodigo = candidatos.filter(s => s.codSap && s.codSap === pallet.codSap);
   const etiqueta = bloqueKey.replace('|G', ', Bloque ');
   if (!mismoCodigo.length){
@@ -923,7 +932,7 @@ function calcular(){
     const resultado = buscarUbicacion(p, slots, byPosBase, byNivelPar, bloques, nivelInicio, nivelFinal, tipoDestino, rackDestino);
     if (resultado){
       asignaciones.push({ pallet: p.nPallet, ubicacion: resultado.ubicacion, row: p.row });
-      const coincidencia = analizarCoincidenciaBloque(resultado.bloqueKey, p, slots, nivelInicio, nivelFinal);
+      const coincidencia = analizarCoincidenciaBloque(resultado.bloqueKey, p, slots, nivelInicio, nivelFinal, resultado.ubicacion);
       body.appendChild(rowFor(p, resultado.ubicacion, 'asignado', coincidencia));
       log(`Pallet ${p.nPallet} (${p.codSap}) → ${resultado.ubicacion} [${resultado.motivo}]`);
       if (coincidencia && coincidencia.tipo === 'fecha_distinta'){
