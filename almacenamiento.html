@@ -189,7 +189,7 @@
         </select>
       </div>
     </div>
-    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR). Se completan al cargar los datos.</small>
+    <small class="note">Si eliges un Código SAP, solo se asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR). Se completan al cargar los datos.</small>
   </div>
 
   <div class="card">
@@ -440,7 +440,7 @@ async function loadData(){
     actualizarOpcionesNivel();
   }catch(err){
     log('Error al cargar datos (tras varios intentos): ' + err.message, 'err');
-    log('Si persiste: abrí la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado en "despertar" — probá Cargar datos de nuevo.', 'err');
+    log('Si persiste: abre la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado el "Wiffi" — prueba Cargar datos de nuevo.', 'err');
   }finally{
     $('loadBtn').disabled = false;
   }
@@ -697,12 +697,12 @@ function renderVacias(){
   const body = $('vaciasBody');
 
   if (!rackDestino){
-    log('Elegí un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
+    log('Elige un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
     wrap.style.display = 'none';
     return;
   }
   if (!sincronizado.length){
-    log('Primero cargá los datos (Cargar datos).', 'err');
+    log('Primero carga los datos (Cargar datos).', 'err');
     return;
   }
 
@@ -1267,7 +1267,7 @@ async function sincronizar(){
       if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    log('Recargá los datos (Cargar datos) para ver Sincronizado actualizado.', 'ok');
+    log('RECARGA los datos (Cargar datos) para ver Sincronizado actualizado.', 'ok');
   }catch(err){
     log('Error al sincronizar: ' + err.message, 'err');
   }finally{
