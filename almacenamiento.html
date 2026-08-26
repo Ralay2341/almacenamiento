@@ -117,6 +117,23 @@
   #log .ok{color:var(--accent2);}
   #log .warn{color:var(--warn);}
 
+  /* Bloques SIMPLE (checklist) y ubicaciones clasificadas */
+  .bloque-chk, .ubic-chk{
+    display:flex; align-items:flex-start; gap:9px;
+    padding:8px 10px; border-radius:8px; margin-bottom:6px;
+    background:var(--panel2); border:1px solid var(--border); cursor:pointer;
+  }
+  .bloque-chk input, .ubic-chk input{width:16px; height:16px; min-width:16px; margin-top:2px; accent-color:var(--accent);}
+  .bloque-chk .b-label{font-weight:600; font-size:13px;}
+  .bloque-chk .b-niveles, .ubic-chk .u-meta{font-size:11px; color:var(--dim); margin-top:2px;}
+  .ubic-chk .u-nombre{font-family:monospace; font-weight:600; font-size:13px;}
+  .ubic-chk.misma-fecha{background:rgba(52,199,89,.12); border-color:var(--accent2);}
+  .ubic-chk.otra-fecha{background:rgba(245,197,66,.12); border-color:var(--warn);}
+  .ubic-sep{
+    font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--dim); margin:10px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border);
+  }
+
   .footerbar{
     position:fixed; bottom:0; left:0; right:0;
     background:rgba(13,17,23,.97); border-top:1px solid var(--border);
@@ -189,13 +206,38 @@
         </select>
       </div>
     </div>
-    <small class="note">Si eliges un Código SAP, solo se asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR). Se completan al cargar los datos.</small>
+    <small class="note">Si eliges un Código SAP, solo se calculan/asignan los pallets de Import con ese código. Si eliges un Rack destino, la búsqueda se limita SOLO a ese Rack (no expande a otros bloques). Si eliges un Tipo de Rack, solo se consideran ubicaciones de ESE tipo (SIMPLE/DOBLE/BAJO/PICKING/PILAR). Se completan al cargar los datos.</small>
+  </div>
+
+  <div class="card" id="bloquesSimpleCard" style="display:none;">
+    <h2>Búsqueda por Bloques (SIMPLE)</h2>
+    <p style="margin:0 0 10px; font-size:13px; color:var(--dim);">
+      Solo para Tipo de Rack = SIMPLE. Recorre el Rack destino en bloques de
+      3 posiciones (podés des-seleccionar los que no querés considerar) y
+      clasifica cada ubicación: <span style="color:var(--accent2);">verde = mismo código, misma fecha</span>,
+      <span style="color:var(--warn);">amarillo = mismo código, otra fecha</span>,
+      blanco = sin código.
+    </p>
+    <button class="btn-secondary" id="cargarBloquesSimpleBtn" type="button">Cargar bloques del Rack</button>
+    <div id="bloquesSimpleLista" style="margin-top:10px;"></div>
+    <div id="bloquesSimpleAcciones" style="display:none; margin-top:10px;">
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <button class="btn-secondary" id="bloquesSimpleTodosBtn" type="button" style="flex:1; padding:8px; font-size:12px;">✔ Todos</button>
+        <button class="btn-secondary" id="bloquesSimpleNingunoBtn" type="button" style="flex:1; padding:8px; font-size:12px;">✕ Ninguno</button>
+      </div>
+      <button class="btn-primary" id="buscarSimpleBtn" type="button">Buscar ubicaciones en bloques elegidos</button>
+    </div>
+    <div id="simpleResultadoWrap" style="margin-top:12px; display:none;">
+      <small class="note" id="simpleResultadoMsg"></small>
+      <div id="simpleUbicLista" style="margin-top:8px;"></div>
+      <button class="btn-success" id="asignarSimpleBtn" type="button" style="margin-top:10px; display:none;">Asignar seleccionadas</button>
+    </div>
   </div>
 
   <div class="card">
     <h2>Ubicaciones vacías del Rack elegido</h2>
     <p style="margin:0 0 10px; font-size:13px; color:var(--dim);">
-      Útil cuando no hay ningún bloque con el código buscado: muestra todas las
+      Útil cuando no hay ningún bloque con el código buscado: mostrá todas las
       ubicaciones vacías disponibles del <strong>Rack destino</strong> elegido
       arriba, respetando el <strong>Nivel inicio/final</strong> y el
       <strong>Tipo de Rack</strong> seleccionados (PILAR nunca aparece).
@@ -237,7 +279,7 @@
           </tr>
         </thead>
         <tbody id="resultBody">
-          <tr><td colspan="10" class="empty">Carga Nuevamente los datos para ver resultados.</td></tr>
+          <tr><td colspan="10" class="empty">Cargá los datos para ver resultados.</td></tr>
         </tbody>
       </table>
     </div>
@@ -263,7 +305,7 @@
 <div class="footerbar">
   <div class="footerbar-inner">
     <button class="btn-secondary" id="loadBtn">Cargar datos</button>
-    <button class="btn-primary" id="calcBtn" disabled>Asignar</button>
+    <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
     <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
     <button class="btn-secondary" id="syncBtn">Sincronizado</button>
   </div>
@@ -440,7 +482,7 @@ async function loadData(){
     actualizarOpcionesNivel();
   }catch(err){
     log('Error al cargar datos (tras varios intentos): ' + err.message, 'err');
-    log('Si persiste: abre la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado el "Wiffi" — prueba Cargar datos de nuevo.', 'err');
+    log('Si persiste: abrí la URL /exec?action=data directo en el navegador. Si ahí sí carga, puede ser que Apps Script haya tardado en "despertar" — probá Cargar datos de nuevo.', 'err');
   }finally{
     $('loadBtn').disabled = false;
   }
@@ -560,6 +602,10 @@ function actualizarOpcionesNivel(){
   // intenta preservar la selección previa si sigue existiendo en la nueva lista de opciones
   inicioSel.value = opciones.includes(prevInicio) ? prevInicio : opciones[0];
   finalSel.value = opciones.includes(prevFinal) ? prevFinal : opciones[opciones.length - 1];
+
+  // La tarjeta "Búsqueda por Bloques (SIMPLE)" solo aplica a Tipo = SIMPLE
+  const cardSimple = $('bloquesSimpleCard');
+  if (cardSimple) cardSimple.style.display = (tipo === 'SIMPLE') ? '' : 'none';
 }
 $('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
 $('rackDestino') && $('rackDestino').addEventListener('change', actualizarOpcionesNivel);
@@ -697,12 +743,12 @@ function renderVacias(){
   const body = $('vaciasBody');
 
   if (!rackDestino){
-    log('Elige un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
+    log('Elegí un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
     wrap.style.display = 'none';
     return;
   }
   if (!sincronizado.length){
-    log('Primero carga los datos (Cargar datos).', 'err');
+    log('Primero cargá los datos (Cargar datos).', 'err');
     return;
   }
 
@@ -804,6 +850,192 @@ function aplicarAsignacionEnTabla(pallet, ubicacion, estado){
   }
   $('saveBtn').disabled = asignaciones.length === 0;
 }
+
+/* ---------------- Búsqueda por Bloques (SIMPLE) — reutiliza el backend del asignador.html ---------------- */
+
+let bloquesSimpleData = [];       // bloques cargados para el Rack elegido
+let simpleFilasImport = [];       // filas de Import sin ubicación para el código buscado
+let simpleUbicResultado = null;   // { vacias, alternativas, message }
+
+async function llamarBackend(action, params){
+  const qp = new URLSearchParams({ action, _: Date.now() });
+  Object.keys(params || {}).forEach(k => {
+    const v = params[k];
+    if (Array.isArray(v)) qp.set(k, v.join(','));
+    else if (v !== undefined && v !== null) qp.set(k, v);
+  });
+  const res = await fetch(`${SCRIPT_URL}?${qp.toString()}`);
+  const texto = await res.text();
+  const data = JSON.parse(texto);
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+$('cargarBloquesSimpleBtn').addEventListener('click', async () => {
+  const rackDestino = $('rackDestino').value;
+  if (!rackDestino){
+    log('Elegí un Rack destino en Parámetros de búsqueda primero.', 'err');
+    return;
+  }
+  $('cargarBloquesSimpleBtn').disabled = true;
+  $('bloquesSimpleLista').innerHTML = '<small class="note">Cargando bloques…</small>';
+  try{
+    const bloques = await llamarBackend('getBloquesPorRack', { rack: rackDestino, tipo: 'SIMPLE' });
+    bloquesSimpleData = bloques;
+    const lista = $('bloquesSimpleLista');
+    lista.innerHTML = '';
+    if (!bloques.length){
+      lista.innerHTML = '<small class="note">Este Rack no tiene ubicaciones Tipo SIMPLE.</small>';
+      $('bloquesSimpleAcciones').style.display = 'none';
+      return;
+    }
+    bloques.forEach((b, i) => {
+      const div = document.createElement('label');
+      div.className = 'bloque-chk';
+      div.innerHTML = `
+        <input type="checkbox" class="bloque-simple-chk" value="${b.inicio}" checked>
+        <div>
+          <div class="b-label">Bloque ${i+1}: ${esc(b.label)}</div>
+          <div class="b-niveles">Niveles: ${b.niveles.map(esc).join(' · ')}</div>
+        </div>
+      `;
+      lista.appendChild(div);
+    });
+    $('bloquesSimpleAcciones').style.display = '';
+    log(`Rack ${normRack(rackDestino)}: ${bloques.length} bloque(s) SIMPLE cargado(s).`, 'ok');
+  }catch(err){
+    $('bloquesSimpleLista').innerHTML = '';
+    log('Error al cargar bloques: ' + err.message, 'err');
+  }finally{
+    $('cargarBloquesSimpleBtn').disabled = false;
+  }
+});
+
+$('bloquesSimpleTodosBtn').addEventListener('click', () => {
+  document.querySelectorAll('.bloque-simple-chk').forEach(c => c.checked = true);
+});
+$('bloquesSimpleNingunoBtn').addEventListener('click', () => {
+  document.querySelectorAll('.bloque-simple-chk').forEach(c => c.checked = false);
+});
+
+$('buscarSimpleBtn').addEventListener('click', async () => {
+  const rackDestino = $('rackDestino').value;
+  const codigo = $('codigoDestino').value;
+  const bloquesSel = [...document.querySelectorAll('.bloque-simple-chk:checked')].map(c => Number(c.value));
+
+  if (!codigo){
+    log('Elegí un Código SAP en "Código SAP a asignar" (Parámetros de búsqueda) antes de buscar.', 'err');
+    return;
+  }
+  if (!bloquesSel.length){
+    log('Seleccioná al menos un bloque.', 'err');
+    return;
+  }
+
+  $('buscarSimpleBtn').disabled = true;
+  $('simpleResultadoWrap').style.display = 'none';
+  log(`Buscando código ${codigo} en ${bloquesSel.length} bloque(s) del Rack ${normRack(rackDestino)}…`);
+  try{
+    const filas = await llamarBackend('getFilasImportSinUbicacion', { codigo });
+    simpleFilasImport = filas;
+    if (!filas.length){
+      log(`No hay pallets pendientes (sin ubicación) en Import con el código ${codigo}.`, 'err');
+      return;
+    }
+    const vencimiento = filas[0].vencimiento;
+    const resultado = await llamarBackend('buscarUbicaciones', {
+      codigo, rack: rackDestino, tipo: 'SIMPLE', bloquesInicio: bloquesSel, vencimiento
+    });
+    simpleUbicResultado = resultado;
+    renderSimpleUbicaciones(resultado, filas.length);
+    log(resultado.message, resultado.vacias.length || resultado.alternativas.length ? 'ok' : 'err');
+  }catch(err){
+    log('Error al buscar: ' + err.message, 'err');
+  }finally{
+    $('buscarSimpleBtn').disabled = false;
+  }
+});
+
+function renderSimpleUbicaciones(resultado, maxSeleccionables){
+  const wrap = $('simpleResultadoWrap');
+  const lista = $('simpleUbicLista');
+  const msgEl = $('simpleResultadoMsg');
+  lista.innerHTML = '';
+  msgEl.textContent = resultado.message;
+
+  const items = resultado.vacias.length ? resultado.vacias : resultado.alternativas;
+  const esAlternativa = !resultado.vacias.length && resultado.alternativas.length > 0;
+
+  if (!items.length){
+    lista.innerHTML = '<small class="note">No hay ubicaciones disponibles.</small>';
+    $('asignarSimpleBtn').style.display = 'none';
+    wrap.style.display = '';
+    return;
+  }
+
+  const secciones = [
+    { tipo: 'mismaFecha', titulo: '✓ Mismo código y misma fecha' },
+    { tipo: 'otraFecha', titulo: '⚠ Mismo código, otra fecha' },
+    { tipo: 'sinCodigo', titulo: 'Sin código (libres)' },
+  ];
+  secciones.forEach(sec => {
+    const deEstaSeccion = items.filter(u => u.tipoCodigo === sec.tipo);
+    if (!deEstaSeccion.length) return;
+    const sep = document.createElement('div');
+    sep.className = 'ubic-sep';
+    sep.textContent = sec.titulo + (esAlternativa ? ' (bloque alternativo)' : '');
+    lista.appendChild(sep);
+    deEstaSeccion.forEach(u => {
+      const claseColor = u.tipoCodigo === 'mismaFecha' ? ' misma-fecha' : u.tipoCodigo === 'otraFecha' ? ' otra-fecha' : '';
+      const marcado = u.tipoCodigo !== 'sinCodigo'; // igual criterio que asignador.html
+      const div = document.createElement('label');
+      div.className = 'ubic-chk' + claseColor;
+      div.innerHTML = `
+        <input type="checkbox" class="simple-ubic-chk" value="${esc(u.ubicacion)}" ${marcado ? 'checked' : ''}>
+        <div>
+          <div class="u-nombre">${esc(u.ubicacion)}</div>
+          <div class="u-meta">Posición ${esc(u.posicion)} · Nivel ${esc(u.nivel)}</div>
+        </div>
+      `;
+      lista.appendChild(div);
+    });
+  });
+
+  $('asignarSimpleBtn').style.display = '';
+  wrap.style.display = '';
+}
+
+$('asignarSimpleBtn').addEventListener('click', async () => {
+  const seleccionadas = [...document.querySelectorAll('.simple-ubic-chk:checked')].map(c => c.value);
+  if (!seleccionadas.length){
+    log('No hay ubicaciones seleccionadas.', 'err');
+    return;
+  }
+  const n = Math.min(seleccionadas.length, simpleFilasImport.length);
+  const paraAsignar = [];
+  for (let i = 0; i < n; i++){
+    paraAsignar.push({ filaImport: simpleFilasImport[i].fila, ubicacion: seleccionadas[i] });
+  }
+  if (seleccionadas.length !== simpleFilasImport.length){
+    log(`Aviso: ${simpleFilasImport.length} pallet(s) pendiente(s), ${seleccionadas.length} ubicación(es) elegida(s) — se asignarán ${n}.`, 'warn');
+  }
+
+  $('asignarSimpleBtn').disabled = true;
+  try{
+    const res = await llamarBackend('asignarUbicacion', { data: JSON.stringify(paraAsignar) });
+    log(res.msg, res.ok ? 'ok' : 'err');
+    if (res.ok){
+      log('Recargá los datos (Cargar datos) para ver Import actualizado.', 'ok');
+      $('simpleResultadoWrap').style.display = 'none';
+      $('bloquesSimpleLista').innerHTML = '';
+      $('bloquesSimpleAcciones').style.display = 'none';
+    }
+  }catch(err){
+    log('Error al asignar: ' + err.message, 'err');
+  }finally{
+    $('asignarSimpleBtn').disabled = false;
+  }
+});
 
 function esc(v){
   return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1267,7 +1499,7 @@ async function sincronizar(){
       if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    log('RECARGA los datos (Cargar datos) para ver Sincronizado actualizado.', 'ok');
+    log('Recargá los datos (Cargar datos) para ver Sincronizado actualizado.', 'ok');
   }catch(err){
     log('Error al sincronizar: ' + err.message, 'err');
   }finally{
