@@ -986,8 +986,14 @@ function renderSimpleUbicaciones(resultado, maxSeleccionables){
     sep.textContent = sec.titulo + (esAlternativa ? ' (bloque alternativo)' : '');
     lista.appendChild(sep);
     deEstaSeccion.forEach(u => {
-      const claseColor = u.tipoCodigo === 'mismaFecha' ? ' misma-fecha' : u.tipoCodigo === 'otraFecha' ? ' otra-fecha' : '';
-      const marcado = u.tipoCodigo !== 'sinCodigo'; // igual criterio que asignador.html
+      // Ahora diferencia verde (mismaFecha) y amarillo (otraFecha) en SIMPLE también
+      const claseColor = u.tipoCodigo === 'mismaFecha' ? ' misma-fecha' 
+                       : u.tipoCodigo === 'otraFecha' ? ' otra-fecha' 
+                       : '';
+      
+      // Se marcan por defecto las que coinciden en código (sea misma o distinta fecha)
+      const marcado = u.tipoCodigo === 'mismaFecha' || u.tipoCodigo === 'otraFecha'; 
+      
       const div = document.createElement('label');
       div.className = 'ubic-chk' + claseColor;
       div.innerHTML = `
