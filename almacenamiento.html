@@ -213,7 +213,7 @@
     <h2 id="bloquesCardTitulo">Búsqueda por Bloques</h2>
     <p style="margin:0 0 10px; font-size:13px; color:var(--dim);" id="bloquesCardDesc">
       Solo para Tipo de Rack = SIMPLE o DOBLE. Recorre el Rack destino en bloques de
-      3 posiciones (podés des-seleccionar los que no querés considerar) y
+      3 posiciones (puedes des-seleccionar los que no quieres considerar) y
       clasifica cada ubicación: <span style="color:var(--accent2);">verde = mismo código, misma fecha</span>,
       <span style="color:var(--warn);">amarillo = mismo código, otra fecha</span>,
       blanco = sin código.
@@ -237,7 +237,7 @@
   <div class="card">
     <h2>Ubicaciones vacías del Rack elegido</h2>
     <p style="margin:0 0 10px; font-size:13px; color:var(--dim);">
-      Útil cuando no hay ningún bloque con el código buscado: mostrá todas las
+      Útil cuando no hay ningún bloque con el código buscado: muestra todas las
       ubicaciones vacías disponibles del <strong>Rack destino</strong> elegido
       arriba, respetando el <strong>Nivel inicio/final</strong> y el
       <strong>Tipo de Rack</strong> seleccionados (PILAR nunca aparece).
@@ -279,7 +279,7 @@
           </tr>
         </thead>
         <tbody id="resultBody">
-          <tr><td colspan="10" class="empty">Cargá los datos para ver resultados.</td></tr>
+          <tr><td colspan="10" class="empty">Carga los datos para ver resultados....!!!</td></tr>
         </tbody>
       </table>
     </div>
@@ -305,7 +305,7 @@
 <div class="footerbar">
   <div class="footerbar-inner">
     <button class="btn-secondary" id="loadBtn">Cargar datos</button>
-    <button class="btn-primary" id="calcBtn" disabled>Calcular</button>
+    <button class="btn-primary" id="calcBtn" disabled>Asignar</button>
     <button class="btn-success" id="saveBtn" disabled>Guardar en Sheet</button>
     <button class="btn-secondary" id="syncBtn">Sincronizado</button>
   </div>
@@ -626,7 +626,7 @@ function actualizarTextoBloquesCard(tipo){
     if (tipo === 'DOBLE'){
       desc.innerHTML = `
         Para Tipo de Rack = DOBLE. Recorre el Rack destino en bloques de
-        3 posiciones (podés des-seleccionar los que no querés considerar) y
+        3 posiciones (puedes des-seleccionar los que no quieres considerar) y
         clasifica cada par Frente/Fondo: <span style="color:var(--accent2);">verde = mismo código, misma fecha</span>,
         <span style="color:var(--warn);">amarillo = mismo código, otra fecha</span>,
         blanco = par sin código. Si el par tiene OTRO código, se omite (no se ofrece).
@@ -634,7 +634,7 @@ function actualizarTextoBloquesCard(tipo){
     } else {
       desc.innerHTML = `
         Para Tipo de Rack = SIMPLE. Recorre el Rack destino en bloques de
-        3 posiciones (podés des-seleccionar los que no querés considerar) y
+        3 posiciones (puedes des-seleccionar los que no quieres considerar) y
         clasifica cada ubicación: <span style="color:var(--accent2);">verde = mismo código, misma fecha</span>,
         <span style="color:var(--warn);">amarillo = mismo código, otra fecha</span>,
         blanco = sin ese código en la posición (libre).
@@ -778,7 +778,7 @@ function renderVacias(){
   const body = $('vaciasBody');
 
   if (!rackDestino){
-    log('Elegí un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
+    log('Elige un Rack destino en Parámetros de búsqueda para ver sus ubicaciones vacías.', 'err');
     wrap.style.display = 'none';
     return;
   }
@@ -841,7 +841,7 @@ $('vaciasBody').addEventListener('click', (ev) => {
   const select = tr.querySelector('.vacia-pallet-select');
   const nPallet = select.value;
   if (!nPallet){
-    log('Elegí un pallet antes de asignar.', 'err');
+    log('Elige un pallet antes de asignar.', 'err');
     return;
   }
   const pallet = importData.find(p => p.nPallet === nPallet);
@@ -910,11 +910,11 @@ $('cargarBloquesSimpleBtn').addEventListener('click', async () => {
   const rackDestino = $('rackDestino').value;
   const tipoActual = $('tipoDestino').value;
   if (!rackDestino){
-    log('Elegí un Rack destino en Parámetros de búsqueda primero.', 'err');
+    log('Elige un Rack destino en Parámetros de búsqueda primero.', 'err');
     return;
   }
   if (tipoActual !== 'SIMPLE' && tipoActual !== 'DOBLE'){
-    log('Elegí Tipo de Rack = SIMPLE o DOBLE en Parámetros de búsqueda primero.', 'err');
+    log('Elige Tipo de Rack = SIMPLE o DOBLE en Parámetros de búsqueda primero.', 'err');
     return;
   }
   $('cargarBloquesSimpleBtn').disabled = true;
@@ -965,7 +965,7 @@ $('buscarSimpleBtn').addEventListener('click', async () => {
   const bloquesSel = [...document.querySelectorAll('.bloque-simple-chk:checked')].map(c => Number(c.value));
 
   if (!codigo){
-    log('Elegí un Código SAP en "Código SAP a asignar" (Parámetros de búsqueda) antes de buscar.', 'err');
+    log('Elige un Código SAP en "Código SAP a asignar" (Parámetros de búsqueda) antes de buscar.', 'err');
     return;
   }
   if (tipoActual !== 'SIMPLE' && tipoActual !== 'DOBLE'){
