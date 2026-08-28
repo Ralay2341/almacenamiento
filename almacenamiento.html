@@ -210,9 +210,9 @@
   </div>
 
   <div class="card" id="bloquesSimpleCard" style="display:none;">
-    <h2>Búsqueda por Bloques (SIMPLE)</h2>
-    <p style="margin:0 0 10px; font-size:13px; color:var(--dim);">
-      Solo para Tipo de Rack = SIMPLE. Recorre el Rack destino en bloques de
+    <h2 id="bloquesCardTitulo">Búsqueda por Bloques</h2>
+    <p style="margin:0 0 10px; font-size:13px; color:var(--dim);" id="bloquesCardDesc">
+      Solo para Tipo de Rack = SIMPLE o DOBLE. Recorre el Rack destino en bloques de
       3 posiciones (podés des-seleccionar los que no querés considerar) y
       clasifica cada ubicación: <span style="color:var(--accent2);">verde = mismo código, misma fecha</span>,
       <span style="color:var(--warn);">amarillo = mismo código, otra fecha</span>,
@@ -603,9 +603,43 @@ function actualizarOpcionesNivel(){
   inicioSel.value = opciones.includes(prevInicio) ? prevInicio : opciones[0];
   finalSel.value = opciones.includes(prevFinal) ? prevFinal : opciones[opciones.length - 1];
 
-  // La tarjeta "Búsqueda por Bloques (SIMPLE)" solo aplica a Tipo = SIMPLE
-  const cardSimple = $('bloquesSimpleCard');
-  if (cardSimple) cardSimple.style.display = (tipo === 'SIMPLE') ? '' : 'none';
+  // La tarjeta "Búsqueda por Bloques" aplica igual a Tipo = SIMPLE y a Tipo = DOBLE
+  const cardBloques = $('bloquesSimpleCard');
+  if (cardBloques){
+    const mostrar = (tipo === 'SIMPLE' || tipo === 'DOBLE');
+    cardBloques.style.display = mostrar ? '' : 'none';
+    if (mostrar) actualizarTextoBloquesCard(tipo);
+  }
+}
+
+/**
+ * Ajusta el título/descripción de la tarjeta "Búsqueda por Bloques" según el
+ * Tipo de Rack elegido, para que SIMPLE y DOBLE tengan explicaciones fieles
+ * a sus reglas reales (mismas reglas de bloques, distinta clasificación de
+ * pares que ya aplica el backend en clasificarUbicacionesVacias_).
+ */
+function actualizarTextoBloquesCard(tipo){
+  const titulo = $('bloquesCardTitulo');
+  const desc = $('bloquesCardDesc');
+  if (titulo) titulo.textContent = `Búsqueda por Bloques (${tipo})`;
+  if (desc){
+    if (tipo === 'DOBLE'){
+      desc.innerHTML = `
+        Para Tipo de Rack = DOBLE. Recorre el Rack destino en bloques de
+        3 posiciones (podés des-seleccionar los que no querés considerar) y
+        clasifica cada par Frente/Fondo: <span style="color:var(--accent2);">verde = mismo código, misma fecha</span>,
+        <span style="color:var(--warn);">amarillo = mismo código, otra fecha</span>,
+        blanco = par sin código. Si el par tiene OTRO código, se omite (no se ofrece).
+      `;
+    } else {
+      desc.innerHTML = `
+        Para Tipo de Rack = SIMPLE. Recorre el Rack destino en bloques de
+        3 posiciones (podés des-seleccionar los que no querés considerar) y
+        clasifica cada ubicación: <span style="color:var(--accent2);">verde = mismo código (SIMPLE no exige misma fecha)</span>,
+        blanco = sin código.
+      `;
+    }
+  }
 }
 $('tipoDestino') && $('tipoDestino').addEventListener('change', actualizarOpcionesNivel);
 $('rackDestino') && $('rackDestino').addEventListener('change', actualizarOpcionesNivel);
@@ -851,7 +885,7 @@ function aplicarAsignacionEnTabla(pallet, ubicacion, estado){
   $('saveBtn').disabled = asignaciones.length === 0;
 }
 
-/* ---------------- Búsqueda por Bloques (SIMPLE) — reutiliza el backend del asignador.html ---------------- */
+/* ---------------- Búsqueda por Bloques (SIMPLE y DOBLE, mismas reglas) — reutiliza el backend del asignador.html ---------------- */
 
 let bloquesSimpleData = [];       // bloques cargados para el Rack elegido
 let simpleFilasImport = [];       // filas de Import sin ubicación para el código buscado
@@ -873,19 +907,24 @@ async function llamarBackend(action, params){
 
 $('cargarBloquesSimpleBtn').addEventListener('click', async () => {
   const rackDestino = $('rackDestino').value;
+  const tipoActual = $('tipoDestino').value;
   if (!rackDestino){
     log('Elegí un Rack destino en Parámetros de búsqueda primero.', 'err');
+    return;
+  }
+  if (tipoActual !== 'SIMPLE' && tipoActual !== 'DOBLE'){
+    log('Elegí Tipo de Rack = SIMPLE o DOBLE en Parámetros de búsqueda primero.', 'err');
     return;
   }
   $('cargarBloquesSimpleBtn').disabled = true;
   $('bloquesSimpleLista').innerHTML = '<small class="note">Cargando bloques…</small>';
   try{
-    const bloques = await llamarBackend('getBloquesPorRack', { rack: rackDestino, tipo: 'SIMPLE' });
+    const bloques = await llamarBackend('getBloquesPorRack', { rack: rackDestino, tipo: tipoActual });
     bloquesSimpleData = bloques;
     const lista = $('bloquesSimpleLista');
     lista.innerHTML = '';
     if (!bloques.length){
-      lista.innerHTML = '<small class="note">Este Rack no tiene ubicaciones Tipo SIMPLE.</small>';
+      lista.innerHTML = `<small class="note">Este Rack no tiene ubicaciones Tipo ${tipoActual}.</small>`;
       $('bloquesSimpleAcciones').style.display = 'none';
       return;
     }
@@ -902,7 +941,7 @@ $('cargarBloquesSimpleBtn').addEventListener('click', async () => {
       lista.appendChild(div);
     });
     $('bloquesSimpleAcciones').style.display = '';
-    log(`Rack ${normRack(rackDestino)}: ${bloques.length} bloque(s) SIMPLE cargado(s).`, 'ok');
+    log(`Rack ${normRack(rackDestino)}: ${bloques.length} bloque(s) ${tipoActual} cargado(s).`, 'ok');
   }catch(err){
     $('bloquesSimpleLista').innerHTML = '';
     log('Error al cargar bloques: ' + err.message, 'err');
@@ -921,10 +960,15 @@ $('bloquesSimpleNingunoBtn').addEventListener('click', () => {
 $('buscarSimpleBtn').addEventListener('click', async () => {
   const rackDestino = $('rackDestino').value;
   const codigo = $('codigoDestino').value;
+  const tipoActual = $('tipoDestino').value;
   const bloquesSel = [...document.querySelectorAll('.bloque-simple-chk:checked')].map(c => Number(c.value));
 
   if (!codigo){
     log('Elegí un Código SAP en "Código SAP a asignar" (Parámetros de búsqueda) antes de buscar.', 'err');
+    return;
+  }
+  if (tipoActual !== 'SIMPLE' && tipoActual !== 'DOBLE'){
+    log('Elegí Tipo de Rack = SIMPLE o DOBLE en Parámetros de búsqueda primero.', 'err');
     return;
   }
   if (!bloquesSel.length){
@@ -934,7 +978,7 @@ $('buscarSimpleBtn').addEventListener('click', async () => {
 
   $('buscarSimpleBtn').disabled = true;
   $('simpleResultadoWrap').style.display = 'none';
-  log(`Buscando código ${codigo} en ${bloquesSel.length} bloque(s) del Rack ${normRack(rackDestino)}…`);
+  log(`Buscando código ${codigo} en ${bloquesSel.length} bloque(s) del Rack ${normRack(rackDestino)} (Tipo ${tipoActual})…`);
   try{
     const filas = await llamarBackend('getFilasImportSinUbicacion', { codigo });
     simpleFilasImport = filas;
@@ -944,7 +988,7 @@ $('buscarSimpleBtn').addEventListener('click', async () => {
     }
     const vencimiento = filas[0].vencimiento;
     const resultado = await llamarBackend('buscarUbicaciones', {
-      codigo, rack: rackDestino, tipo: 'SIMPLE', bloquesInicio: bloquesSel, vencimiento
+      codigo, rack: rackDestino, tipo: tipoActual, bloquesInicio: bloquesSel, vencimiento
     });
     simpleUbicResultado = resultado;
     renderSimpleUbicaciones(resultado, filas.length);
@@ -986,14 +1030,8 @@ function renderSimpleUbicaciones(resultado, maxSeleccionables){
     sep.textContent = sec.titulo + (esAlternativa ? ' (bloque alternativo)' : '');
     lista.appendChild(sep);
     deEstaSeccion.forEach(u => {
-      // Ahora diferencia verde (mismaFecha) y amarillo (otraFecha) en SIMPLE también
-      const claseColor = u.tipoCodigo === 'mismaFecha' ? ' misma-fecha' 
-                       : u.tipoCodigo === 'otraFecha' ? ' otra-fecha' 
-                       : '';
-      
-      // Se marcan por defecto las que coinciden en código (sea misma o distinta fecha)
-      const marcado = u.tipoCodigo === 'mismaFecha' || u.tipoCodigo === 'otraFecha'; 
-      
+      const claseColor = u.tipoCodigo === 'mismaFecha' ? ' misma-fecha' : u.tipoCodigo === 'otraFecha' ? ' otra-fecha' : '';
+      const marcado = u.tipoCodigo !== 'sinCodigo'; // igual criterio que asignador.html
       const div = document.createElement('label');
       div.className = 'ubic-chk' + claseColor;
       div.innerHTML = `
